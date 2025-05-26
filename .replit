@@ -3,3 +3,33 @@ modules = ["python-3.12"]
 [nix]
 channel = "stable-24_05"
 packages = ["espeak-ng", "glibcLocales", "libGL", "libGLU", "libsndfile", "libxcrypt", "pkg-config", "portaudio", "scrot", "tesseract", "xsimd", "xvfb-run"]
+
+[workflows]
+runButton = "تشغيل المساعد الموحد"
+
+[[workflows.workflow]]
+name = "تشغيل المساعد الموحد"
+author = 43143009
+mode = "sequential"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python main_unified.py"
+
+[[workflows.workflow]]
+name = "تحليل المشروع المتقدم"
+author = 43143009
+mode = "sequential"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python tools/advanced_analyzer.py"
+
+[[workflows.workflow]]
+name = "تنظيف الملفات"
+author = 43143009
+mode = "sequential"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python cleanup_duplicates.py"
