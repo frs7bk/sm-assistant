@@ -1,0 +1,53 @@
+
+# المتطلبات الأساسية للمساعد الذكي الموحد
+asyncio-mqtt==0.11.0
+openai>=1.0.0
+transformers>=4.30.0
+torch>=2.0.0
+numpy>=1.24.0
+pandas>=2.0.0
+scikit-learn>=1.3.0
+
+# معالجة الصوت والنصوص
+speech_recognition>=3.10.0
+pyttsx3>=2.90
+librosa>=0.10.0
+soundfile>=0.12.0
+
+# معالجة الصور والرؤية الحاسوبية
+opencv-python>=4.8.0
+Pillow>=10.0.0
+face_recognition>=1.3.0
+mediapipe>=0.10.0
+
+# واجهات المستخدم والويب
+streamlit>=1.25.0
+dash>=2.10.0
+plotly>=5.15.0
+gradio>=3.35.0
+
+# أدوات التطوير والاختبار
+pytest>=7.4.0
+black>=23.0.0
+flake8>=6.0.0
+mypy>=1.4.0
+
+# أدوات الإنتاجية
+schedule>=1.2.0
+python-dateutil>=2.8.0
+requests>=2.31.0
+aiohttp>=3.8.0
+
+# قواعد البيانات والتخزين
+sqlite3
+redis>=4.6.0
+pymongo>=4.4.0
+
+# الأمان والتشفير
+cryptography>=41.0.0
+jwt>=1.3.1
+
+# متنوعة
+python-dotenv>=1.0.0
+colorama>=0.4.6
+tqdm>=4.65.0

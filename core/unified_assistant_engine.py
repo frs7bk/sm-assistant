@@ -18,6 +18,14 @@ from enum import Enum
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
+# استيراد نظام الإعدادات
+try:
+    from config.settings import get_settings, validate_environment
+    settings = get_settings()
+except ImportError:
+    print("⚠️ تعذر تحميل الإعدادات، استخدام الإعدادات الافتراضية")
+    settings = None
+
 @dataclass
 class ProcessingResult:
     """نتيجة معالجة الأمر"""
@@ -40,6 +48,14 @@ class UnifiedAssistantEngine:
     
     def __init__(self, config_path: Optional[str] = None):
         """تهيئة المحرك مع جميع الوحدات المتقدمة"""
+        # تحميل الإعدادات أولاً
+        if settings:
+            self.settings = settings
+            if not validate_environment():
+                self.logger.warning("بعض الإعدادات غير صحيحة")
+        else:
+            self.settings = None
+            
         self.setup_logging()
         self.logger = logging.getLogger(__name__)
         
@@ -47,6 +63,14 @@ class UnifiedAssistantEngine:
         self.current_mode = AssistantMode.NORMAL
         self.active_sessions = {}
         self.processing_queue = asyncio.Queue()
+        
+        # إحصائيات الأداء
+        self.performance_stats = {
+            "total_commands": 0,
+            "successful_commands": 0,
+            "failed_commands": 0,
+            "average_response_time": 0.0
+        }
         
         # الوحدات الأساسية
         self._init_core_modules()

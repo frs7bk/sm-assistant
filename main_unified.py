@@ -2,259 +2,252 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-نقطة الدخول الموحدة للمساعد الذكي المتقدم
+المساعد الذكي الموحد - النقطة الرئيسية للتشغيل
+يدمج جميع الميزات والوحدات في نظام واحد متقدم
 """
 
-import logging
 import asyncio
+import logging
 import sys
-import os
+import signal
 from pathlib import Path
+from typing import Optional
 
 # إضافة مسار المشروع
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
-from modules.intent_context import IntentClassifier, ContextMemory
-from modules.user_manager import UserManager
-from modules.background_tasks import BackgroundTaskManager
-from modules.vision.recognition_3d.recognition_3d_engine import VisionIntelligenceEngine
-from modules.voice_emotion.emotion_recognizer import EmotionRecognizer
-from modules.productivity import *
-from modules.security.smart_security import SecurityMonitor
-from modules.analytics.behavior_predictor import BehaviorPredictor
-from modules.reminder_scheduler import ReminderScheduler
+# الاستيرادات الأساسية
+try:
+    from config.settings import get_settings, validate_environment
+    from core.module_manager import get_module_manager
+    from core.unified_assistant_engine import UnifiedAssistantEngine
+    
+    settings_available = True
+except ImportError as e:
+    print(f"⚠️ تعذر تحميل بعض الوحدات: {e}")
+    settings_available = False
 
-class UnifiedAdvancedAssistant:
-    """المساعد الذكي المتقدم الموحد"""
+class UnifiedAssistantRunner:
+    """مشغل المساعد الذكي الموحد"""
     
     def __init__(self):
-        """تهيئة المساعد بجميع الوحدات المتقدمة"""
         self.setup_logging()
         self.logger = logging.getLogger(__name__)
         
-        # الوحدات الأساسية
-        self.intent_classifier = IntentClassifier()
-        self.context_memory = ContextMemory()
-        self.user_manager = UserManager()
-        self.security_monitor = SecurityMonitor()
+        # المكونات الأساسية
+        self.settings = None
+        self.module_manager = None
+        self.assistant_engine = None
+        self.running = False
         
-        # الوحدات المتقدمة
-        self.vision_engine = VisionIntelligenceEngine()
-        self.emotion_recognizer = EmotionRecognizer()
-        self.behavior_predictor = BehaviorPredictor()
-        self.reminder_scheduler = ReminderScheduler()
-        self.background_tasks = BackgroundTaskManager()
-        
-        # حالة المساعد
-        self.current_user = None
-        self.session_active = False
-        
-        self.logger.info("تم تهيئة المساعد الذكي المتقدم بنجاح")
+        # إعداد معالجات الإشارات
+        self.setup_signal_handlers()
     
     def setup_logging(self):
         """إعداد نظام السجلات"""
+        log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        
+        # إعداد متقدم للسجلات
         logging.basicConfig(
             level=logging.INFO,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            format=log_format,
             handlers=[
-                logging.FileHandler('assistant.log', encoding='utf-8'),
-                logging.StreamHandler(sys.stdout)
+                logging.StreamHandler(sys.stdout),
+                logging.FileHandler('unified_assistant.log', encoding='utf-8')
             ]
         )
+        
+        # تخصيص مستويات السجلات
+        logging.getLogger('transformers').setLevel(logging.WARNING)
+        logging.getLogger('torch').setLevel(logging.WARNING)
     
-    async def process_command(self, command: str, user_id: str = None) -> dict:
-        """معالجة الأوامر بطريقة متقدمة"""
+    def setup_signal_handlers(self):
+        """إعداد معالجات الإشارات للإيقاف الآمن"""
+        def signal_handler(signum, frame):
+            self.logger.info(f"تم استلام إشارة الإيقاف: {signum}")
+            self.running = False
+        
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+    
+    async def initialize(self):
+        """تهيئة جميع مكونات المساعد"""
+        self.logger.info("🚀 بدء تهيئة المساعد الذكي الموحد...")
+        
         try:
-            # فحص الأمان
-            if self.security_monitor.is_suspicious(command):
-                self.logger.warning(f"أمر مشبوه تم اكتشافه: {command}")
-                return {
-                    "status": "blocked",
-                    "message": "تم حجب الأمر لأسباب أمنية",
-                    "command": command
-                }
-            
-            # تصنيف القصد
-            intent = self.intent_classifier.classify(command)
-            self.logger.info(f"تم تصنيف القصد: {intent}")
-            
-            # تحديث السياق
-            if user_id:
-                self.context_memory.update_context(user_id, "last_command", command)
-                self.context_memory.update_context(user_id, "last_intent", intent)
-            
-            # معالجة الأوامر المختلفة
-            if intent == "reminder":
-                return await self.handle_reminder(command, user_id)
-            elif intent == "focus_mode":
-                return await self.handle_focus_mode(user_id)
-            elif intent == "analyze_emotion":
-                return await self.handle_emotion_analysis(user_id)
-            elif intent == "productivity":
-                return await self.handle_productivity_task(command, user_id)
+            # 1. تحميل الإعدادات
+            if settings_available:
+                self.settings = get_settings()
+                if not validate_environment():
+                    self.logger.warning("⚠️ بعض الإعدادات غير مكتملة")
+                else:
+                    self.logger.info("✅ تم تحميل الإعدادات بنجاح")
             else:
-                return await self.handle_general_query(command, user_id)
-                
-        except Exception as e:
-            self.logger.error(f"خطأ في معالجة الأمر: {str(e)}")
-            return {
-                "status": "error",
-                "message": f"حدث خطأ أثناء معالجة الأمر: {str(e)}",
-                "command": command
-            }
-    
-    async def handle_reminder(self, command: str, user_id: str) -> dict:
-        """معالجة أوامر التذكير"""
-        # استخراج التوقيت والرسالة من الأمر
-        # هذا مثال بسيط - يحتاج لمعالجة NLP أكثر تطوراً
-        if "في" in command:
-            parts = command.split("في")
-            if len(parts) >= 2:
-                reminder_text = parts[0].replace("ذكرني", "").strip()
-                time_text = parts[1].strip()
-                
-                # إضافة التذكير
-                self.reminder_scheduler.add_reminder(time_text, reminder_text)
-                
-                return {
-                    "status": "success",
-                    "message": f"تم إضافة التذكير: {reminder_text} في {time_text}",
-                    "reminder": reminder_text,
-                    "time": time_text
-                }
-        
-        return {
-            "status": "error",
-            "message": "لم أتمكن من فهم صيغة التذكير. حاول: 'ذكرني بالاجتماع في 15:00'"
-        }
-    
-    async def handle_focus_mode(self, user_id: str) -> dict:
-        """تفعيل وضع التركيز"""
-        self.context_memory.update_context(user_id, "focus_mode", True)
-        
-        return {
-            "status": "success",
-            "message": "تم تفعيل وضع التركيز. سأقلل من الإشعارات والمقاطعات.",
-            "mode": "focus_activated"
-        }
-    
-    async def handle_emotion_analysis(self, user_id: str) -> dict:
-        """تحليل المشاعر الحالية للمستخدم"""
-        try:
-            # هذا يحتاج لكاميرا أو صوت فعلي
-            # في الوقت الحالي سنستخدم بيانات وهمية
-            analysis_result = {
-                "visual_emotion": "محايد",
-                "confidence": 0.8,
-                "suggestions": [
-                    "يبدو أنك في حالة محايدة",
-                    "هل تحتاج مساعدة في شيء معين؟"
-                ]
-            }
+                self.logger.warning("⚠️ تشغيل بدون ملف الإعدادات")
             
-            return {
-                "status": "success",
-                "message": "تم تحليل المشاعر",
-                "analysis": analysis_result
-            }
+            # 2. تهيئة مدير الوحدات
+            self.module_manager = get_module_manager()
+            successful, total = await self.module_manager.load_all_modules()
+            
+            if successful > 0:
+                self.logger.info(f"✅ تم تحميل {successful}/{total} وحدة")
+            else:
+                self.logger.warning("⚠️ لم يتم تحميل أي وحدة - التشغيل في الوضع الأساسي")
+            
+            # 3. تهيئة محرك المساعد
+            self.assistant_engine = UnifiedAssistantEngine()
+            self.logger.info("✅ تم تهيئة محرك المساعد")
+            
+            # 4. عرض تقرير التهيئة
+            await self.show_initialization_report()
+            
+            self.running = True
+            self.logger.info("🎉 تم تهيئة المساعد بنجاح!")
+            
+            return True
             
         except Exception as e:
-            return {
-                "status": "error",
-                "message": f"فشل تحليل المشاعر: {str(e)}"
-            }
+            self.logger.error(f"❌ فشل في التهيئة: {str(e)}")
+            return False
     
-    async def handle_productivity_task(self, command: str, user_id: str) -> dict:
-        """معالجة مهام الإنتاجية"""
-        if "slack" in command.lower():
-            # مثال لإرسال رسالة Slack
-            return {
-                "status": "info",
-                "message": "يحتاج إعداد مفاتيح Slack API لتفعيل هذه الميزة"
+    async def show_initialization_report(self):
+        """عرض تقرير التهيئة"""
+        print("\n" + "="*60)
+        print("🤖 المساعد الذكي الموحد - تقرير التهيئة")
+        print("="*60)
+        
+        # معلومات الإعدادات
+        if self.settings:
+            print(f"📁 مجلد المشروع: {self.settings.project_root}")
+            print(f"🔧 وضع التطوير: {'نعم' if self.settings.debug_mode else 'لا'}")
+            print(f"🌐 اللغة: {self.settings.language}")
+        
+        # معلومات الوحدات
+        if self.module_manager:
+            report = self.module_manager.get_status_report()
+            print(f"\n📦 حالة الوحدات:")
+            print(f"   • إجمالي: {report['total_modules']}")
+            print(f"   • محملة: {report['status_counts']['loaded']}")
+            print(f"   • فاشلة: {report['status_counts']['failed']}")
+            
+            # عرض الوحدات المحملة حسب النوع
+            loaded_modules = {
+                name: info for name, info in self.module_manager.modules.items()
+                if info.status.value == "loaded"
             }
-        elif "trello" in command.lower():
-            return {
-                "status": "info", 
-                "message": "يحتاج إعداد مفاتيح Trello API لتفعيل هذه الميزة"
-            }
-        else:
-            return {
-                "status": "info",
-                "message": "الميزات الإنتاجية المتاحة: Slack, Trello, Jira"
-            }
+            
+            if loaded_modules:
+                print(f"\n✅ الوحدات المتاحة:")
+                module_types = {}
+                for name, info in loaded_modules.items():
+                    if info.module_type not in module_types:
+                        module_types[info.module_type] = []
+                    module_types[info.module_type].append(name.split('.')[-1])
+                
+                for module_type, modules in module_types.items():
+                    print(f"   🔹 {module_type}: {', '.join(modules)}")
+        
+        # الميزات المتاحة
+        print(f"\n🎯 الميزات المتاحة:")
+        features = [
+            "معالجة اللغة الطبيعية",
+            "التعلم النشط والتكيفي", 
+            "نظام إدارة الوحدات المتقدم",
+            "واجهة تفاعلية ذكية"
+        ]
+        
+        if self.settings:
+            if self.settings.ai_models.openai_api_key:
+                features.append("تكامل GPT-4 المتقدم")
+            if self.settings.interface.enable_voice:
+                features.append("معالجة صوتية")
+            if self.settings.interface.enable_vision:
+                features.append("رؤية حاسوبية")
+        
+        for feature in features:
+            print(f"   ✨ {feature}")
+        
+        print("\n" + "="*60)
     
-    async def handle_general_query(self, command: str, user_id: str) -> dict:
-        """معالجة الاستفسارات العامة"""
-        return {
-            "status": "success",
-            "message": f"تم استلام استفسارك: {command}",
-            "suggestion": "يمكنني مساعدتك في التذكيرات، تحليل المشاعر، والمهام الإنتاجية"
-        }
-    
-    async def start_session(self, user_id: str = None):
-        """بدء جلسة مع المساعد"""
-        self.session_active = True
-        self.current_user = user_id
-        
-        if user_id:
-            self.logger.info(f"بدء جلسة للمستخدم: {user_id}")
-        
-        # بدء المهام الخلفية
-        self.reminder_scheduler.run_scheduler()
-        
-        print("🤖 مرحباً! أنا مساعدك الذكي المتقدم")
-        print("📝 يمكنني مساعدتك في:")
-        print("   • إدارة التذكيرات")
-        print("   • تحليل المشاعر") 
-        print("   • المهام الإنتاجية")
-        print("   • وضع التركيز")
-        print("   • والمزيد...")
-        print("\n💬 اكتب أمرك أو 'exit' للخروج")
-        
-        return {
-            "status": "session_started",
-            "user_id": user_id,
-            "features": [
-                "reminders", "emotion_analysis", 
-                "productivity", "focus_mode"
-            ]
-        }
-    
-    async def run_interactive_session(self):
-        """تشغيل جلسة تفاعلية"""
-        await self.start_session()
+    async def run(self):
+        """تشغيل المساعد الرئيسي"""
+        if not await self.initialize():
+            self.logger.error("❌ فشل في التهيئة - إنهاء البرنامج")
+            return
         
         try:
-            while self.session_active:
-                user_input = input("\n👤 أدخل أمرك: ").strip()
-                
-                if user_input.lower() in ['exit', 'خروج', 'quit']:
-                    break
-                
-                if not user_input:
-                    continue
-                
-                result = await self.process_command(user_input, self.current_user)
-                
-                print(f"\n🤖 {result.get('message', 'تم معالجة الأمر')}")
-                
-                if result.get('status') == 'error':
-                    print(f"❌ خطأ: {result.get('message')}")
-                elif result.get('status') == 'success':
-                    print(f"✅ {result.get('message')}")
-                
+            # تشغيل الواجهة التفاعلية
+            await self.assistant_engine.start_interactive_session()
+            
         except KeyboardInterrupt:
-            print("\n\n👋 وداعاً!")
+            self.logger.info("تم إيقاف المساعد بواسطة المستخدم")
         except Exception as e:
-            self.logger.error(f"خطأ في الجلسة التفاعلية: {str(e)}")
+            self.logger.error(f"خطأ في تشغيل المساعد: {str(e)}")
         finally:
-            self.session_active = False
+            await self.cleanup()
+    
+    async def cleanup(self):
+        """تنظيف الموارد عند الإغلاق"""
+        self.logger.info("🧹 تنظيف الموارد...")
+        
+        self.running = False
+        
+        # تنظيف المحرك
+        if self.assistant_engine:
+            # إضافة منطق التنظيف هنا
+            pass
+        
+        # تنظيف الوحدات
+        if self.module_manager:
+            # إضافة منطق تنظيف الوحدات هنا
+            pass
+        
+        self.logger.info("✅ تم تنظيف الموارد")
+    
+    async def run_web_interface(self):
+        """تشغيل الواجهة الويب (مستقبلي)"""
+        if not self.settings or not self.settings.interface.enable_web:
+            self.logger.info("الواجهة الويب غير مفعلة")
+            return
+        
+        self.logger.info(f"🌐 بدء الواجهة الويب على المنفذ {self.settings.interface.web_port}")
+        # سيتم تطوير هذا لاحقاً
+    
+    def get_status(self) -> dict:
+        """الحصول على حالة المساعد"""
+        status = {
+            "running": self.running,
+            "settings_loaded": self.settings is not None,
+            "modules_loaded": 0,
+            "engine_ready": self.assistant_engine is not None
+        }
+        
+        if self.module_manager:
+            report = self.module_manager.get_status_report()
+            status["modules_loaded"] = report['status_counts']['loaded']
+            status["total_modules"] = report['total_modules']
+        
+        return status
 
 async def main():
     """الدالة الرئيسية"""
-    assistant = UnifiedAdvancedAssistant()
-    await assistant.run_interactive_session()
+    print("🤖 بدء تشغيل المساعد الذكي الموحد...")
+    
+    runner = UnifiedAssistantRunner()
+    
+    try:
+        await runner.run()
+    except Exception as e:
+        print(f"❌ خطأ فادح: {str(e)}")
+        sys.exit(1)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    # تشغيل المساعد
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\n👋 تم إيقاف المساعد")
+    except Exception as e:
+        print(f"❌ خطأ في التشغيل: {str(e)}")
+        sys.exit(1)
