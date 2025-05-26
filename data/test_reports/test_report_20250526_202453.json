@@ -1,0 +1,60 @@
+{
+  "timestamp": 1748291093.3123066,
+  "date": "2025-05-26 20:24:53",
+  "results": {
+    "core_modules": {
+      "success": false,
+      "error": "No module named 'pydantic'",
+      "traceback": "Traceback (most recent call last):\n  File \"/home/runner/workspace/tests/comprehensive_test_suite.py\", line 91, in test_core_modules\n    from core.config import get_config\n  File \"/home/runner/workspace/core/config.py\", line 10, in <module>\n    from pydantic import BaseSettings, Field\nModuleNotFoundError: No module named 'pydantic'\n"
+    },
+    "ai_engines": {
+      "success": false,
+      "error": "No module named 'numpy'",
+      "traceback": "Traceback (most recent call last):\n  File \"/home/runner/workspace/tests/comprehensive_test_suite.py\", line 119, in test_ai_engines\n    from core.advanced_ai_engine import get_ai_engine\n  File \"/home/runner/workspace/core/advanced_ai_engine.py\", line 13, in <module>\n    import numpy as np\nModuleNotFoundError: No module named 'numpy'\n"
+    },
+    "integration_hub": {
+      "success": false,
+      "error": "No module named 'aiohttp'",
+      "traceback": "Traceback (most recent call last):\n  File \"/home/runner/workspace/tests/comprehensive_test_suite.py\", line 145, in test_integration_hub\n    from core.integration_hub import integration_hub\n  File \"/home/runner/workspace/core/integration_hub.py\", line 14, in <module>\n    import aiohttp\nModuleNotFoundError: No module named 'aiohttp'\n"
+    },
+    "performance_optimizer": {
+      "success": false,
+      "error": "No module named 'redis'",
+      "traceback": "Traceback (most recent call last):\n  File \"/home/runner/workspace/tests/comprehensive_test_suite.py\", line 173, in test_performance_optimizer\n    from core.performance_optimizer import performance_optimizer\n  File \"/home/runner/workspace/core/performance_optimizer.py\", line 16, in <module>\n    import redis\nModuleNotFoundError: No module named 'redis'\n"
+    },
+    "reliability_engine": {
+      "success": false,
+      "error": "No module named 'psutil'",
+      "traceback": "Traceback (most recent call last):\n  File \"/home/runner/workspace/tests/comprehensive_test_suite.py\", line 198, in test_reliability_engine\n    from core.reliability_engine import reliability_engine\n  File \"/home/runner/workspace/core/reliability_engine.py\", line 18, in <module>\n    import psutil\nModuleNotFoundError: No module named 'psutil'\n"
+    },
+    "main_unified": {
+      "success": false,
+      "error": "expected 'except' or 'finally' block (main_unified.py, line 121)",
+      "traceback": "Traceback (most recent call last):\n  File \"/home/runner/workspace/tests/comprehensive_test_suite.py\", line 227, in test_main_unified\n    import main_unified\n  File \"/home/runner/workspace/main_unified.py\", line 121\n    async def initialize_optimization_engines(self):\nSyntaxError: expected 'except' or 'finally' block\n"
+    },
+    "api_services": {
+      "success": false,
+      "error": "No module named 'fastapi'",
+      "traceback": "Traceback (most recent call last):\n  File \"/home/runner/workspace/tests/comprehensive_test_suite.py\", line 258, in test_api_services\n    from api.services import APIService\n  File \"/home/runner/workspace/api/services.py\", line 13, in <module>\n    from fastapi import WebSocket\nModuleNotFoundError: No module named 'fastapi'\n"
+    },
+    "frontend_interface": {
+      "success": true,
+      "message": "واجهة المستخدم الأمامية سليمة",
+      "files_checked": 3,
+      "html_size": 8989
+    },
+    "advanced_features": {
+      "success": true,
+      "message": "تم اختبار الميزات المتقدمة المتاحة",
+      "features_available": [
+        "smart_automation"
+      ],
+      "features_count": 1
+    }
+  },
+  "summary": {
+    "total_tests": 9,
+    "passed": 2,
+    "failed": 7
+  }
+}
