@@ -31,6 +31,7 @@ try:
     from analytics.big_data.dask_processor import DaskProcessor
     from analytics.prediction.dl_predictor import DeepLearningPredictor
     from ai_models.learning.active_learning import ActiveLearning
+    from ai_models.nlg.fastspeech_tts import UltraNaturalTTS
     from tools.project_organizer import ProjectOrganizer
 except ImportError as e:
     print(f"⚠️ خطأ في استيراد المكونات: {e}")
@@ -55,6 +56,7 @@ class AdvancedUnifiedAssistant:
         self.dask_processor: Optional[DaskProcessor] = None
         self.dl_predictor: Optional[DeepLearningPredictor] = None
         self.active_learning: Optional[ActiveLearning] = None
+        self.tts_engine: Optional[UltraNaturalTTS] = None
 
         # حالة النظام
         self.is_running = False
@@ -156,6 +158,13 @@ class AdvancedUnifiedAssistant:
             except Exception as e:
                 self.print_colored(f"⚠️ التعلم النشط غير متاح: {e}", Fore.YELLOW)
 
+            # محرك TTS للصوت
+            try:
+                self.tts_engine = UltraNaturalTTS()
+                self.print_colored("✅ محرك التوليد الصوتي جاهز", Fore.GREEN)
+            except Exception as e:
+                self.print_colored(f"⚠️ محرك TTS غير متاح: {e}", Fore.YELLOW)
+
         except Exception as e:
             self.logger.error(f"خطأ في تهيئة المكونات المتقدمة: {e}")
 
@@ -240,6 +249,8 @@ class AdvancedUnifiedAssistant:
                     self.session_data
                 )
                 if ai_response:
+                    # توليد الصوت للرد
+                    await self.speak_response(ai_response)
                     return ai_response
 
             # استخدام محرك المساعد الموحد
@@ -249,14 +260,20 @@ class AdvancedUnifiedAssistant:
                     context=self.session_data
                 )
                 if assistant_response:
-                    return assistant_response
+                    response_text = assistant_response.get('text', assistant_response)
+                    await self.speak_response(response_text)
+                    return response_text
 
             # رد افتراضي ذكي
-            return await self.generate_fallback_response(user_input)
+            fallback_response = await self.generate_fallback_response(user_input)
+            await self.speak_response(fallback_response)
+            return fallback_response
 
         except Exception as e:
             self.logger.error(f"خطأ في المعالجة الذكية: {e}")
-            return f"🤔 أعتذر، لم أتمكن من فهم طلبك بشكل كامل. هل يمكنك إعادة صياغته؟"
+            error_msg = f"🤔 أعتذر، لم أتمكن من فهم طلبك بشكل كامل. هل يمكنك إعادة صياغته؟"
+            await self.speak_response(error_msg)
+            return error_msg
 
     async def generate_fallback_response(self, user_input: str) -> str:
         """توليد رد احتياطي ذكي"""
@@ -318,6 +335,35 @@ class AdvancedUnifiedAssistant:
 """
         return stats
 
+    async def speak_response(self, text: str):
+        """توليد الصوت للرد"""
+        try:
+            if self.tts_engine and text:
+                # تنظيف النص من رموز التنسيق
+                clean_text = text.replace("🤖", "").replace("✨", "").replace("📊", "")
+                clean_text = ' '.join(clean_text.split())  # إزالة المسافات الزائدة
+                
+                if len(clean_text.strip()) > 0:
+                    # توليد ملف صوتي
+                    audio_file = f"data/temp_response_{datetime.now().strftime('%Y%m%d_%H%M%S')}.wav"
+                    Path("data").mkdir(exist_ok=True)
+                    
+                    await asyncio.to_thread(
+                        self.tts_engine.synthesize_ultra_natural,
+                        clean_text,
+                        output_path=audio_file
+                    )
+                    
+                    # تشغيل الصوت (يمكن استخدام مشغل الصوت المناسب للنظام)
+                    try:
+                        import playsound
+                        await asyncio.to_thread(playsound.playsound, audio_file)
+                    except:
+                        self.print_colored("🔊 الصوت جاهز لكن لا يمكن تشغيله تلقائياً", Fore.YELLOW)
+                        
+        except Exception as e:
+            self.logger.error(f"خطأ في توليد الصوت: {e}")
+
     def get_help_message(self) -> str:
         """رسالة المساعدة"""
         help_text = f"""
@@ -332,6 +378,11 @@ class AdvancedUnifiedAssistant:
 {Fore.WHITE}  • تحليل / analyze - تحليل البيانات الضخمة
   • توقع / predict - عمل توقعات ذكية
   • تعلم - تفعيل التعلم النشط
+
+{Fore.YELLOW}🔊 الميزات الصوتية:
+{Fore.WHITE}  • الرد الصوتي تلقائي (مُفعّل)
+  • نبرة صوت تتكيف مع المشاعر
+  • دعم العربية والإنجليزية
 
 {Fore.YELLOW}💡 أمثلة على الاستخدام:
 {Fore.WHITE}  • "ما هو الطقس اليوم؟"
