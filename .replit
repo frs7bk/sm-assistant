@@ -5,7 +5,7 @@ channel = "stable-24_05"
 packages = ["arrow-cpp", "bash", "bluez", "cairo", "cargo", "coreutils", "espeak-ng", "ffmpeg-full", "file", "firefox", "freetype", "geckodriver", "ghostscript", "glibcLocales", "gobject-introspection", "gtk3", "lcms2", "libGL", "libGLU", "libcxx", "libiconv", "libimagequant", "libjpeg", "libsndfile", "libtiff", "libwebp", "libxcrypt", "libyaml", "nodejs", "openjpeg", "openssl", "pkg-config", "portaudio", "qhull", "rustc", "scrot", "tcl", "tesseract", "tk", "xsimd", "xvfb-run", "zlib"]
 
 [workflows]
-runButton = "تشغيل المساعد التفاعلي"
+runButton = "تشغيل المساعد الاحترافي"
 
 [[workflows.workflow]]
 name = "تشغيل المساعد الموحد"
@@ -42,3 +42,12 @@ mode = "sequential"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "python core/unified_assistant_engine.py"
+
+[[workflows.workflow]]
+name = "تشغيل المساعد الاحترافي"
+author = 42940651
+mode = "sequential"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python main.py"
