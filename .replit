@@ -2,7 +2,7 @@ modules = ["python-3.12"]
 
 [nix]
 channel = "stable-24_05"
-packages = ["espeak-ng", "glibcLocales", "libGL", "libGLU", "libsndfile", "libxcrypt", "pkg-config", "portaudio", "scrot", "tesseract", "xsimd", "xvfb-run"]
+packages = ["arrow-cpp", "bash", "bluez", "cairo", "cargo", "coreutils", "espeak-ng", "ffmpeg-full", "file", "firefox", "freetype", "geckodriver", "ghostscript", "glibcLocales", "gobject-introspection", "gtk3", "libGL", "libGLU", "libcxx", "libiconv", "libsndfile", "libxcrypt", "libyaml", "nodejs", "openssl", "pkg-config", "portaudio", "qhull", "rustc", "scrot", "tcl", "tesseract", "tk", "xsimd", "xvfb-run"]
 
 [workflows]
 runButton = "تشغيل المساعد التفاعلي"

@@ -1,0 +1,12 @@
+{
+  "session_id": "2025-05-26T15:29:36.049206",
+  "user_id": "default",
+  "stats": {
+    "total_interactions": 2,
+    "successful_responses": 1,
+    "error_count": 0,
+    "avg_confidence": 0.6,
+    "session_duration": 96.150568
+  },
+  "conversation_count": 2
+}
