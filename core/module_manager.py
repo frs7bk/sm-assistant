@@ -7,7 +7,7 @@
 """
 
 import asyncio
-import importlib
+import importlib.util
 import inspect
 import logging
 from pathlib import Path

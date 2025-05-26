@@ -24,10 +24,15 @@ sys.path.insert(0, str(project_root))
 
 try:
     from core.advanced_ai_engine import get_ai_engine, AIResponse
-    from core.module_manager import get_module_manager
     AI_ENGINE_AVAILABLE = True
 except ImportError:
     AI_ENGINE_AVAILABLE = False
+
+try:
+    from core.module_manager import get_module_manager
+    MODULE_MANAGER_AVAILABLE = True
+except ImportError:
+    MODULE_MANAGER_AVAILABLE = False
 
 @dataclass
 class ConversationTurn:
@@ -96,9 +101,12 @@ class UnifiedAssistantEngine:
                 self.logger.warning("⚠️ محرك الذكاء الاصطناعي غير متاح")
             
             # تهيئة مدير الوحدات
-            self.module_manager = get_module_manager()
-            if not self.module_manager:
-                self.logger.warning("⚠️ مدير الوحدات غير متاح")
+            if MODULE_MANAGER_AVAILABLE:
+                self.module_manager = get_module_manager()
+                if not self.module_manager:
+                    self.logger.warning("⚠️ مدير الوحدات غير متاح")
+            else:
+                self.logger.warning("⚠️ مدير الوحدات غير متاح - استيراد فاشل")
             
             # تهيئة العمال للمعالجة المتوازية
             self._initialize_workers()

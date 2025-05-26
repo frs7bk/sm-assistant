@@ -2,47 +2,63 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-محرك الذكاء الاصطناعي المتقدم للمساعد الذكي
-يدمج أحدث تقنيات الذكاء الاصطناعي والتعلم الآلي
+محرك الذكاء الاصطناعي المتطور
+يدمج أحدث تقنيات الذكاء الاصطناعي والتعلم العميق
 """
 
 import asyncio
 import logging
-import numpy as np
-import torch
-import torch.nn as nn
-import torch.optim as optim
-from typing import Dict, List, Optional, Any, Tuple, Union
-from dataclasses import dataclass
-from pathlib import Path
 import json
+import time
+import numpy as np
 import pickle
+from pathlib import Path
+from typing import Dict, List, Optional, Any, Tuple, Union
+from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 import threading
 import queue
-import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import sys
 
-# استيراد النماذج المتقدمة
+# إضافة مسار المشروع
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
+
+# المكتبات المتقدمة (مع معالجة الأخطاء)
 try:
-    import openai
+    import torch
+    import torch.nn as nn
+    import torch.nn.functional as F
     from transformers import (
         AutoTokenizer, AutoModel, AutoModelForSequenceClassification,
-        pipeline, BertModel, GPT2LMHeadModel, T5ForConditionalGeneration
+        pipeline, GPT2LMHeadModel, GPT2Tokenizer
     )
-    from sentence_transformers import SentenceTransformer
-    import cv2
-    from sklearn.metrics.pairwise import cosine_similarity
-    from sklearn.cluster import DBSCAN
-    from sklearn.ensemble import RandomForestClassifier, GradientBoostingRegressor
-    from sklearn.neural_network import MLPClassifier
-    ADVANCED_LIBS_AVAILABLE = True
+    TRANSFORMERS_AVAILABLE = True
 except ImportError:
-    ADVANCED_LIBS_AVAILABLE = False
+    TRANSFORMERS_AVAILABLE = False
+
+try:
+    import cv2
+    import face_recognition
+    CV2_AVAILABLE = True
+except ImportError:
+    CV2_AVAILABLE = False
+
+try:
+    import openai
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
+
+try:
+    from config.advanced_config import get_config
+    CONFIG_AVAILABLE = True
+except ImportError:
+    CONFIG_AVAILABLE = False
 
 @dataclass
 class AIResponse:
-    """استجابة الذكاء الاصطناعي"""
+    """استجابة محرك الذكاء الاصطناعي"""
     text: str
     confidence: float
     context: Dict[str, Any]
@@ -51,6 +67,8 @@ class AIResponse:
     intent: str
     suggestions: List[str]
     metadata: Dict[str, Any]
+    processing_time: float = 0.0
+    model_used: str = "unknown"
 
 @dataclass
 class UserProfile:
@@ -59,255 +77,261 @@ class UserProfile:
     preferences: Dict[str, Any]
     interaction_history: List[Dict[str, Any]]
     emotional_state: Dict[str, float]
-    learning_progress: Dict[str, float]
+    learning_progress: Dict[str, Any]
     goals: List[str]
     last_updated: datetime
+    
+    def __post_init__(self):
+        if isinstance(self.last_updated, str):
+            self.last_updated = datetime.fromisoformat(self.last_updated)
 
 class NeuralMemoryNetwork(nn.Module):
     """شبكة الذاكرة العصبية المتقدمة"""
     
-    def __init__(self, input_dim=768, hidden_dim=512, memory_size=1000):
+    def __init__(self, input_size: int = 768, hidden_size: int = 512, memory_size: int = 1000):
         super().__init__()
+        
+        self.input_size = input_size
+        self.hidden_size = hidden_size
         self.memory_size = memory_size
-        self.input_dim = input_dim
-        self.hidden_dim = hidden_dim
         
         # طبقات التشفير
         self.encoder = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
+            nn.Linear(input_size, hidden_size),
             nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(hidden_dim, hidden_dim),
+            nn.Dropout(0.1),
+            nn.Linear(hidden_size, hidden_size),
             nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim)
+            nn.Dropout(0.1)
         )
         
-        # ذاكرة قابلة للكتابة
-        self.memory_keys = nn.Parameter(torch.randn(memory_size, hidden_dim))
-        self.memory_values = nn.Parameter(torch.randn(memory_size, hidden_dim))
-        
         # آلية الانتباه
-        self.attention = nn.MultiheadAttention(hidden_dim, num_heads=8)
+        self.attention = nn.MultiheadAttention(
+            hidden_size, num_heads=8, dropout=0.1, batch_first=True
+        )
+        
+        # ذاكرة طويلة المدى
+        self.memory_bank = nn.Parameter(
+            torch.randn(memory_size, hidden_size), requires_grad=True
+        )
         
         # طبقة الإخراج
         self.decoder = nn.Sequential(
-            nn.Linear(hidden_dim * 2, hidden_dim),
+            nn.Linear(hidden_size * 2, hidden_size),
             nn.ReLU(),
-            nn.Linear(hidden_dim, input_dim)
+            nn.Dropout(0.1),
+            nn.Linear(hidden_size, input_size)
         )
         
-    def forward(self, x):
+        # مؤشر الذاكرة
+        self.memory_pointer = 0
+    
+    def forward(self, x: torch.Tensor, update_memory: bool = True) -> Tuple[torch.Tensor, torch.Tensor]:
+        """المرور الأمامي عبر الشبكة"""
+        batch_size = x.size(0)
+        
         # تشفير الإدخال
         encoded = self.encoder(x)
         
-        # حساب درجات الانتباه للذاكرة
-        attention_scores = torch.matmul(encoded, self.memory_keys.T)
-        attention_weights = torch.softmax(attention_scores, dim=-1)
+        # الانتباه مع بنك الذاكرة
+        memory_expanded = self.memory_bank.unsqueeze(0).expand(batch_size, -1, -1)
+        attended, attention_weights = self.attention(
+            encoded.unsqueeze(1), memory_expanded, memory_expanded
+        )
+        attended = attended.squeeze(1)
         
-        # استرجاع من الذاكرة
-        retrieved_memory = torch.matmul(attention_weights, self.memory_values)
-        
-        # دمج الإدخال مع الذاكرة
-        combined = torch.cat([encoded, retrieved_memory], dim=-1)
-        
-        # فك التشفير
+        # دمج المعلومات
+        combined = torch.cat([encoded, attended], dim=-1)
         output = self.decoder(combined)
         
+        # تحديث الذاكرة
+        if update_memory and self.training:
+            self._update_memory(encoded.detach())
+        
         return output, attention_weights
+    
+    def _update_memory(self, new_memory: torch.Tensor):
+        """تحديث بنك الذاكرة"""
+        with torch.no_grad():
+            # إضافة ذكريات جديدة بطريقة دائرية
+            for memory in new_memory:
+                self.memory_bank[self.memory_pointer] = memory
+                self.memory_pointer = (self.memory_pointer + 1) % self.memory_size
 
 class AdvancedAIEngine:
-    """محرك الذكاء الاصطناعي المتقدم"""
+    """محرك الذكاء الاصطناعي المتطور"""
     
-    def __init__(self, model_dir: Optional[Path] = None):
+    def __init__(self):
         self.logger = logging.getLogger(__name__)
-        self.model_dir = model_dir or Path("data/models")
-        self.model_dir.mkdir(parents=True, exist_ok=True)
         
         # حالة المحرك
         self.is_initialized = False
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
+        # التكوين
+        self.config = get_config() if CONFIG_AVAILABLE else None
+        
+        # النماذج المحملة
         self.models = {}
-        self.user_profiles = {}
-        self.conversation_context = []
-        self.emotional_memory = {}
+        self.tokenizers = {}
         
-        # الشبكة العصبية للذاكرة
-        self.memory_network = None
-        self.memory_optimizer = None
+        # الذاكرة العصبية
+        self.neural_memory = None
         
-        # خيوط المعالجة
-        self.executor = ThreadPoolExecutor(max_workers=4)
-        self.processing_queue = queue.Queue()
+        # ملفات المستخدمين
+        self.user_profiles: Dict[str, UserProfile] = {}
         
         # إحصائيات الأداء
         self.performance_stats = {
             "total_requests": 0,
-            "avg_response_time": 0.0,
-            "accuracy_score": 0.0,
-            "user_satisfaction": 0.0
+            "successful_requests": 0,
+            "average_response_time": 0.0,
+            "cache_hits": 0,
+            "model_switches": 0
         }
         
+        # مخزن الذاكرة
+        self.memory_store = {}
+        self.model_dir = Path("data/models")
+        self.model_dir.mkdir(parents=True, exist_ok=True)
+        
+        # قائمة انتظار المعالجة
+        self.processing_queue = queue.PriorityQueue()
+        self.background_workers = []
+    
     async def initialize(self):
         """تهيئة محرك الذكاء الاصطناعي"""
-        self.logger.info("🧠 تهيئة محرك الذكاء الاصطناعي المتقدم...")
+        self.logger.info("🧠 تهيئة محرك الذكاء الاصطناعي المتطور...")
         
         try:
             # تحميل النماذج الأساسية
-            await self._load_language_models()
-            await self._load_vision_models()
-            await self._load_audio_models()
+            await self._load_base_models()
             
-            # تهيئة الشبكة العصبية للذاكرة
-            self._initialize_memory_network()
+            # تهيئة الذاكرة العصبية
+            self._initialize_neural_memory()
             
             # تحميل ملفات المستخدمين
-            self._load_user_profiles()
+            await self._load_user_profiles()
             
-            # تهيئة نظام التعلم النشط
-            self._initialize_active_learning()
+            # تشغيل العمال الخلفيين
+            self._start_background_workers()
             
             self.is_initialized = True
             self.logger.info("✅ تم تهيئة محرك الذكاء الاصطناعي بنجاح")
             
         except Exception as e:
             self.logger.error(f"❌ فشل تهيئة محرك الذكاء الاصطناعي: {e}")
-            raise
+            # تهيئة في الوضع الأساسي
+            self.is_initialized = True
     
-    async def _load_language_models(self):
-        """تحميل نماذج معالجة اللغة"""
-        if not ADVANCED_LIBS_AVAILABLE:
-            self.logger.warning("المكتبات المتقدمة غير متاحة")
+    async def _load_base_models(self):
+        """تحميل النماذج الأساسية"""
+        if not TRANSFORMERS_AVAILABLE:
+            self.logger.warning("⚠️ Transformers غير متاح - تشغيل في الوضع الأساسي")
             return
         
-        self.logger.info("📚 تحميل نماذج اللغة...")
-        
         try:
-            # نموذج التضمينات
-            self.models['embeddings'] = SentenceTransformer('all-MiniLM-L6-v2')
-            
             # نموذج تحليل المشاعر
             self.models['sentiment'] = pipeline(
-                "sentiment-analysis",
-                model="cardiffnlp/twitter-roberta-base-sentiment-latest"
+                'sentiment-analysis',
+                model='cardiffnlp/twitter-xlm-roberta-base-sentiment',
+                device=0 if torch.cuda.is_available() else -1
             )
+            self.logger.info("✅ تم تحميل نموذج تحليل المشاعر")
             
-            # نموذج تحليل الكيانات
+            # نموذج استخراج الكيانات
             self.models['ner'] = pipeline(
-                "ner",
-                model="dbmdz/bert-large-cased-finetuned-conll03-english",
-                aggregation_strategy="simple"
+                'ner',
+                model='CAMeL-Lab/bert-base-arabic-camelbert-mix-ner',
+                device=0 if torch.cuda.is_available() else -1,
+                aggregation_strategy='simple'
             )
+            self.logger.info("✅ تم تحميل نموذج استخراج الكيانات")
             
-            # نموذج توليد النصوص
-            self.models['generation'] = pipeline(
-                "text-generation",
-                model="microsoft/DialoGPT-medium"
-            )
-            
-            self.logger.info("✅ تم تحميل نماذج اللغة")
+            # نموذج التضمين
+            model_name = 'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2'
+            self.tokenizers['embedding'] = AutoTokenizer.from_pretrained(model_name)
+            self.models['embedding'] = AutoModel.from_pretrained(model_name)
+            self.models['embedding'].to(self.device)
+            self.logger.info("✅ تم تحميل نموذج التضمين")
             
         except Exception as e:
-            self.logger.error(f"❌ فشل تحميل نماذج اللغة: {e}")
+            self.logger.warning(f"⚠️ خطأ في تحميل بعض النماذج: {e}")
     
-    async def _load_vision_models(self):
-        """تحميل نماذج الرؤية الحاسوبية"""
-        self.logger.info("👁️ تحميل نماذج الرؤية...")
-        
+    def _initialize_neural_memory(self):
+        """تهيئة الذاكرة العصبية"""
         try:
-            # كاشف الوجوه
-            self.models['face_cascade'] = cv2.CascadeClassifier(
-                cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
-            )
-            
-            # كاشف الابتسامة
-            self.models['smile_cascade'] = cv2.CascadeClassifier(
-                cv2.data.haarcascades + 'haarcascade_smile.xml'
-            )
-            
-            self.logger.info("✅ تم تحميل نماذج الرؤية")
-            
-        except Exception as e:
-            self.logger.error(f"❌ فشل تحميل نماذج الرؤية: {e}")
-    
-    async def _load_audio_models(self):
-        """تحميل نماذج معالجة الصوت"""
-        self.logger.info("🎵 تحميل نماذج الصوت...")
-        
-        try:
-            # سيتم إضافة نماذج الصوت هنا
-            self.logger.info("✅ تم تحميل نماذج الصوت")
+            if TRANSFORMERS_AVAILABLE:
+                self.neural_memory = NeuralMemoryNetwork()
+                self.neural_memory.to(self.device)
+                
+                # تحميل حالة محفوظة إن وجدت
+                memory_path = self.model_dir / "neural_memory.pth"
+                if memory_path.exists():
+                    self.neural_memory.load_state_dict(torch.load(memory_path, map_location=self.device))
+                    self.logger.info("✅ تم تحميل الذاكرة العصبية المحفوظة")
+                else:
+                    self.logger.info("🧠 تم إنشاء ذاكرة عصبية جديدة")
             
         except Exception as e:
-            self.logger.error(f"❌ فشل تحميل نماذج الصوت: {e}")
+            self.logger.warning(f"⚠️ خطأ في تهيئة الذاكرة العصبية: {e}")
     
-    def _initialize_memory_network(self):
-        """تهيئة شبكة الذاكرة العصبية"""
-        self.logger.info("🧠 تهيئة شبكة الذاكرة العصبية...")
-        
-        try:
-            self.memory_network = NeuralMemoryNetwork()
-            self.memory_optimizer = optim.Adam(
-                self.memory_network.parameters(),
-                lr=0.001
-            )
-            
-            # تحميل الذاكرة المحفوظة إن وجدت
-            memory_path = self.model_dir / "memory_network.pth"
-            if memory_path.exists():
-                checkpoint = torch.load(memory_path, map_location='cpu')
-                self.memory_network.load_state_dict(checkpoint['model'])
-                self.memory_optimizer.load_state_dict(checkpoint['optimizer'])
-                self.logger.info("تم تحميل الذاكرة المحفوظة")
-            
-        except Exception as e:
-            self.logger.error(f"❌ فشل تهيئة شبكة الذاكرة: {e}")
-    
-    def _load_user_profiles(self):
+    async def _load_user_profiles(self):
         """تحميل ملفات المستخدمين"""
-        profiles_path = self.model_dir / "user_profiles.json"
-        
-        if profiles_path.exists():
-            try:
+        try:
+            profiles_path = self.model_dir / "user_profiles.json"
+            
+            if profiles_path.exists():
                 with open(profiles_path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    
-                for user_id, profile_data in data.items():
+                    profiles_data = json.load(f)
+                
+                for user_id, data in profiles_data.items():
                     self.user_profiles[user_id] = UserProfile(
                         user_id=user_id,
-                        preferences=profile_data.get('preferences', {}),
-                        interaction_history=profile_data.get('interaction_history', []),
-                        emotional_state=profile_data.get('emotional_state', {}),
-                        learning_progress=profile_data.get('learning_progress', {}),
-                        goals=profile_data.get('goals', []),
-                        last_updated=datetime.fromisoformat(
-                            profile_data.get('last_updated', datetime.now().isoformat())
-                        )
+                        preferences=data.get('preferences', {}),
+                        interaction_history=data.get('interaction_history', []),
+                        emotional_state=data.get('emotional_state', {"neutral": 1.0}),
+                        learning_progress=data.get('learning_progress', {}),
+                        goals=data.get('goals', []),
+                        last_updated=datetime.fromisoformat(data.get('last_updated', datetime.now().isoformat()))
                     )
-                    
-                self.logger.info(f"تم تحميل {len(self.user_profiles)} ملف مستخدم")
                 
-            except Exception as e:
-                self.logger.error(f"فشل تحميل ملفات المستخدمين: {e}")
+                self.logger.info(f"✅ تم تحميل {len(self.user_profiles)} ملف مستخدم")
+            
+        except Exception as e:
+            self.logger.warning(f"⚠️ خطأ في تحميل ملفات المستخدمين: {e}")
     
-    def _initialize_active_learning(self):
-        """تهيئة نظام التعلم النشط"""
-        self.logger.info("🎓 تهيئة نظام التعلم النشط...")
+    def _start_background_workers(self):
+        """تشغيل العمال الخلفيين"""
+        num_workers = 2
         
-        # تهيئة مصنفات التعلم الآلي
-        self.models['intent_classifier'] = MLPClassifier(
-            hidden_layer_sizes=(128, 64, 32),
-            activation='relu',
-            solver='adam',
-            learning_rate='adaptive',
-            max_iter=1000
-        )
+        for i in range(num_workers):
+            worker = threading.Thread(
+                target=self._background_worker,
+                name=f"AIWorker-{i}",
+                daemon=True
+            )
+            worker.start()
+            self.background_workers.append(worker)
         
-        self.models['emotion_predictor'] = GradientBoostingRegressor(
-            n_estimators=100,
-            learning_rate=0.1,
-            max_depth=6
-        )
-        
-        self.logger.info("✅ تم تهيئة نظام التعلم النشط")
+        self.logger.info(f"🔄 تم تشغيل {num_workers} عامل خلفي")
+    
+    def _background_worker(self):
+        """العامل الخلفي للمعالجة"""
+        while True:
+            try:
+                priority, task = self.processing_queue.get(timeout=1)
+                
+                # تنفيذ المهمة
+                task_func, args, kwargs = task
+                task_func(*args, **kwargs)
+                
+                self.processing_queue.task_done()
+                
+            except queue.Empty:
+                continue
+            except Exception as e:
+                self.logger.error(f"خطأ في العامل الخلفي: {e}")
     
     async def process_natural_language(
         self, 
@@ -320,40 +344,39 @@ class AdvancedAIEngine:
         start_time = time.time()
         
         try:
-            # تنظيف وتحضير النص
-            processed_text = self._preprocess_text(text)
+            self.performance_stats["total_requests"] += 1
+            
+            # تنظيف النص
+            cleaned_text = self._preprocess_text(text)
+            
+            # الحصول على ملف المستخدم
+            user_profile = self._get_or_create_user_profile(user_id)
             
             # تحليل المشاعر
-            emotions = await self._analyze_emotions(processed_text)
+            emotions = await self._analyze_emotions(cleaned_text)
             
             # استخراج الكيانات
-            entities = await self._extract_entities(processed_text)
+            entities = await self._extract_entities(cleaned_text)
             
             # تحديد القصد
-            intent = await self._detect_intent(processed_text, context)
+            intent = await self._classify_intent(cleaned_text, context)
             
             # توليد الاستجابة
             response_text = await self._generate_response(
-                processed_text, intent, emotions, user_id
+                cleaned_text, intent, emotions, entities, user_profile, context
             )
             
-            # حساب الثقة
-            confidence = self._calculate_confidence(
-                processed_text, intent, emotions
-            )
+            # حساب مستوى الثقة
+            confidence = self._calculate_confidence(intent, emotions, entities)
             
-            # اقتراح المتابعات
-            suggestions = await self._generate_suggestions(
-                processed_text, intent, user_id
-            )
+            # توليد الاقتراحات
+            suggestions = await self._generate_suggestions(intent, context)
             
-            # تحديث ذاكرة المستخدم
-            await self._update_user_memory(
-                user_id, text, response_text, emotions, intent
-            )
+            # تحديث ملف المستخدم
+            self._update_user_profile(user_profile, text, response_text, emotions, intent)
             
             # إنشاء الاستجابة
-            ai_response = AIResponse(
+            response = AIResponse(
                 text=response_text,
                 confidence=confidence,
                 context=context or {},
@@ -362,16 +385,18 @@ class AdvancedAIEngine:
                 intent=intent,
                 suggestions=suggestions,
                 metadata={
-                    "processing_time": time.time() - start_time,
-                    "model_versions": self._get_model_versions(),
-                    "user_id": user_id
-                }
+                    "user_id": user_id,
+                    "model_used": "advanced_ai_engine",
+                    "processing_steps": ["emotion_analysis", "entity_extraction", "intent_classification", "response_generation"]
+                },
+                processing_time=time.time() - start_time,
+                model_used="advanced_ai_engine"
             )
             
-            # تحديث الإحصائيات
-            self._update_performance_stats(time.time() - start_time)
+            self.performance_stats["successful_requests"] += 1
+            self._update_performance_stats(response.processing_time)
             
-            return ai_response
+            return response
             
         except Exception as e:
             self.logger.error(f"خطأ في معالجة اللغة الطبيعية: {e}")
@@ -385,7 +410,9 @@ class AdvancedAIEngine:
                 entities=[],
                 intent="error",
                 suggestions=["إعادة المحاولة", "تبسيط السؤال"],
-                metadata={"error": str(e)}
+                metadata={"error": str(e)},
+                processing_time=time.time() - start_time,
+                model_used="fallback"
             )
     
     def _preprocess_text(self, text: str) -> str:
@@ -393,257 +420,432 @@ class AdvancedAIEngine:
         # إزالة المسافات الزائدة
         text = ' '.join(text.split())
         
-        # تطبيع النص العربي (إذا كان متاحاً)
-        # يمكن إضافة المزيد من المعالجة هنا
+        # تطبيع النص العربي (يمكن إضافة المزيد)
+        text = text.strip()
         
-        return text.strip()
+        return text
     
     async def _analyze_emotions(self, text: str) -> Dict[str, float]:
         """تحليل المشاعر المتقدم"""
         try:
-            if 'sentiment' in self.models:
+            if 'sentiment' in self.models and TRANSFORMERS_AVAILABLE:
                 result = self.models['sentiment'](text)
                 
-                # تحويل النتيجة إلى تنسيق موحد
                 emotions = {"neutral": 0.5}
                 
                 if result:
                     label = result[0]['label'].lower()
-                    score = result[0]['score']
+                    score = float(result[0]['score'])
                     
-                    if 'positive' in label:
-                        emotions.update({
-                            "joy": score * 0.7,
-                            "excitement": score * 0.3,
-                            "satisfaction": score * 0.5
-                        })
-                    elif 'negative' in label:
-                        emotions.update({
-                            "sadness": score * 0.4,
-                            "anger": score * 0.3,
-                            "frustration": score * 0.3
-                        })
+                    if 'positive' in label or 'pos' in label:
+                        emotions = {"happy": score, "neutral": 1-score}
+                    elif 'negative' in label or 'neg' in label:
+                        emotions = {"sad": score, "neutral": 1-score}
+                    else:
+                        emotions = {"neutral": score}
                 
                 return emotions
-            
+            else:
+                return await self._basic_emotion_analysis(text)
+                
         except Exception as e:
-            self.logger.error(f"خطأ في تحليل المشاعر: {e}")
-        
-        return {"neutral": 1.0}
+            self.logger.warning(f"خطأ في تحليل المشاعر: {e}")
+            return {"neutral": 1.0}
     
-    async def _extract_entities(self, text: str) -> List[Dict[str, Any]]:
-        """استخراج الكيانات"""
-        try:
-            if 'ner' in self.models:
-                entities = self.models['ner'](text)
-                return [
-                    {
-                        "text": entity['word'],
-                        "label": entity['entity_group'],
-                        "confidence": entity['score'],
-                        "start": entity.get('start', 0),
-                        "end": entity.get('end', len(entity['word']))
-                    }
-                    for entity in entities
-                ]
-        except Exception as e:
-            self.logger.error(f"خطأ في استخراج الكيانات: {e}")
-        
-        return []
-    
-    async def _detect_intent(
-        self, 
-        text: str, 
-        context: Optional[Dict[str, Any]] = None
-    ) -> str:
-        """تحديد قصد المستخدم"""
-        
-        # قصود أساسية بناءً على كلمات مفتاحية
-        intent_keywords = {
-            "greeting": ["مرحبا", "أهلا", "سلام", "صباح", "مساء"],
-            "question": ["ماذا", "كيف", "متى", "أين", "لماذا", "مَن"],
-            "request": ["أريد", "أحتاج", "ممكن", "هل يمكن", "ساعدني"],
-            "information": ["معلومات", "تفاصيل", "شرح", "وضح"],
-            "command": ["افعل", "قم بـ", "اعمل", "نفذ"],
-            "goodbye": ["وداعا", "مع السلامة", "إلى اللقاء"]
-        }
+    async def _basic_emotion_analysis(self, text: str) -> Dict[str, float]:
+        """تحليل مشاعر أساسي"""
+        positive_words = ["سعيد", "ممتاز", "رائع", "جيد", "مذهل", "حب", "فرح"]
+        negative_words = ["حزين", "سيء", "فظيع", "مشكلة", "خطأ", "غضب", "كره"]
         
         text_lower = text.lower()
         
-        for intent, keywords in intent_keywords.items():
-            if any(keyword in text_lower for keyword in keywords):
-                return intent
+        positive_count = sum(1 for word in positive_words if word in text_lower)
+        negative_count = sum(1 for word in negative_words if word in text_lower)
         
-        return "general"
+        total = positive_count + negative_count
+        
+        if total == 0:
+            return {"neutral": 1.0}
+        
+        emotions = {
+            "happy": positive_count / total if positive_count > negative_count else 0.0,
+            "sad": negative_count / total if negative_count > positive_count else 0.0,
+            "neutral": 1.0 - max(positive_count, negative_count) / total
+        }
+        
+        return emotions
+    
+    async def _extract_entities(self, text: str) -> List[Dict[str, Any]]:
+        """استخراج الكيانات المتقدم"""
+        try:
+            if 'ner' in self.models and TRANSFORMERS_AVAILABLE:
+                entities = self.models['ner'](text)
+                
+                processed_entities = []
+                for entity in entities:
+                    processed_entities.append({
+                        "text": entity['word'],
+                        "label": entity['entity_group'],
+                        "confidence": float(entity['score']),
+                        "start": int(entity['start']),
+                        "end": int(entity['end'])
+                    })
+                
+                return processed_entities
+            else:
+                return await self._basic_entity_extraction(text)
+                
+        except Exception as e:
+            self.logger.warning(f"خطأ في استخراج الكيانات: {e}")
+            return []
+    
+    async def _basic_entity_extraction(self, text: str) -> List[Dict[str, Any]]:
+        """استخراج كيانات أساسي"""
+        entities = []
+        
+        # البحث عن أرقام
+        import re
+        numbers = re.findall(r'\d+', text)
+        for num in numbers:
+            entities.append({
+                "text": num,
+                "label": "NUMBER",
+                "confidence": 0.8,
+                "start": text.find(num),
+                "end": text.find(num) + len(num)
+            })
+        
+        return entities
+    
+    async def _classify_intent(self, text: str, context: Optional[Dict[str, Any]]) -> str:
+        """تصنيف القصد المتقدم"""
+        text_lower = text.lower()
+        
+        # قصود أساسية
+        if any(word in text_lower for word in ["مرحبا", "أهلا", "سلام", "صباح", "مساء"]):
+            return "greeting"
+        elif any(word in text_lower for word in ["شكرا", "متشكر", "أشكرك"]):
+            return "thanks"
+        elif any(word in text_lower for word in ["وداعا", "مع السلامة", "إلى اللقاء"]):
+            return "goodbye"
+        elif "؟" in text or any(word in text_lower for word in ["كيف", "ماذا", "متى", "أين", "لماذا", "من"]):
+            return "question"
+        elif any(word in text_lower for word in ["ساعدني", "أريد", "أحتاج", "يمكنك"]):
+            return "request"
+        elif any(word in text_lower for word in ["لا", "توقف", "كفى", "إيقاف"]):
+            return "stop"
+        else:
+            return "general"
     
     async def _generate_response(
-        self, 
-        text: str, 
-        intent: str, 
+        self,
+        text: str,
+        intent: str,
         emotions: Dict[str, float],
-        user_id: str
+        entities: List[Dict[str, Any]],
+        user_profile: UserProfile,
+        context: Optional[Dict[str, Any]]
     ) -> str:
-        """توليد الاستجابة الذكية"""
+        """توليد الاستجابة المتقدم"""
         
-        # الحصول على ملف المستخدم
-        user_profile = self.user_profiles.get(user_id)
+        # استخدام GPT إذا كان متاحاً
+        if OPENAI_AVAILABLE and self.config and self.config.ai_models.openai_api_key:
+            try:
+                return await self._generate_with_gpt(text, intent, emotions, user_profile, context)
+            except Exception as e:
+                self.logger.warning(f"خطأ في GPT: {e}")
         
-        # استجابات مخصصة حسب القصد
-        if intent == "greeting":
-            if user_profile and user_profile.preferences.get("formal", False):
-                return "أهلاً وسهلاً بك. كيف يمكنني مساعدتك؟"
-            else:
-                return "مرحبا! كيف حالك؟ كيف يمكنني مساعدتك اليوم؟"
+        # استجابات محلية متقدمة
+        return await self._generate_local_response(text, intent, emotions, entities, user_profile, context)
+    
+    async def _generate_with_gpt(
+        self,
+        text: str,
+        intent: str,
+        emotions: Dict[str, float],
+        user_profile: UserProfile,
+        context: Optional[Dict[str, Any]]
+    ) -> str:
+        """توليد الاستجابة باستخدام GPT"""
+        try:
+            openai.api_key = self.config.ai_models.openai_api_key
+            
+            # بناء الرسالة المتقدمة
+            system_message = self._build_system_message(user_profile, emotions, context)
+            
+            response = openai.ChatCompletion.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": system_message},
+                    {"role": "user", "content": text}
+                ],
+                temperature=0.7,
+                max_tokens=1024
+            )
+            
+            return response['choices'][0]['message']['content']
+            
+        except Exception as e:
+            self.logger.error(f"خطأ في GPT: {e}")
+            raise
+    
+    def _build_system_message(
+        self,
+        user_profile: UserProfile,
+        emotions: Dict[str, float],
+        context: Optional[Dict[str, Any]]
+    ) -> str:
+        """بناء رسالة النظام المتقدمة"""
         
-        elif intent == "question":
-            return "سؤال ممتاز! دعني أفكر في الإجابة الأفضل لك..."
+        base_message = "أنت مساعد ذكي متطور وودود. تتحدث بالعربية وتفهم السياق جيداً."
         
-        elif intent == "request":
-            return "بالطبع! سأكون سعيداً لمساعدتك. ما الذي تحتاجه تحديداً؟"
+        # إضافة معلومات المستخدم
+        if user_profile.preferences:
+            base_message += f" تفضيلات المستخدم: {user_profile.preferences}"
         
-        elif intent == "goodbye":
-            return "وداعاً! أتمنى أن أكون قد ساعدتك. لا تتردد في العودة إليّ في أي وقت."
+        # إضافة الحالة العاطفية
+        dominant_emotion = max(emotions, key=emotions.get)
+        if dominant_emotion != "neutral":
+            base_message += f" المستخدم يبدو {dominant_emotion}."
         
+        # إضافة السياق
+        if context and "recent_topics" in context:
+            base_message += f" المواضيع الأخيرة: {context['recent_topics']}"
+        
+        return base_message
+    
+    async def _generate_local_response(
+        self,
+        text: str,
+        intent: str,
+        emotions: Dict[str, float],
+        entities: List[Dict[str, Any]],
+        user_profile: UserProfile,
+        context: Optional[Dict[str, Any]]
+    ) -> str:
+        """توليد استجابة محلية متقدمة"""
+        
+        responses = {
+            "greeting": [
+                "مرحباً! كيف يمكنني مساعدتك اليوم؟",
+                "أهلاً وسهلاً! ما الذي تريد أن نتحدث عنه؟",
+                "السلام عليكم! أنا هنا للمساعدة."
+            ],
+            "thanks": [
+                "عفواً! أسعدني أن أساعدك.",
+                "لا شكر على واجب! هل تحتاج أي شيء آخر؟",
+                "كل التقدير لك! كيف يمكنني خدمتك أكثر؟"
+            ],
+            "goodbye": [
+                "وداعاً! أتمنى لك يوماً سعيداً.",
+                "إلى اللقاء! أراك قريباً.",
+                "مع السلامة! عودة ميمونة."
+            ],
+            "question": [
+                "سؤال ممتاز! دعني أفكر في أفضل إجابة...",
+                "هذا سؤال مهم. سأحاول مساعدتك بأفضل طريقة ممكنة.",
+                "أقدر فضولك! إليك ما أعرفه..."
+            ],
+            "request": [
+                "بالطبع! سأفعل ما بوسعي لمساعدتك.",
+                "سأكون سعيداً لمساعدتك في ذلك.",
+                "دعني أرى كيف يمكنني تحقيق طلبك."
+            ]
+        }
+        
+        # اختيار استجابة أساسية
+        intent_responses = responses.get(intent, ["أفهم ما تقوله. كيف يمكنني مساعدتك؟"])
+        
+        # تخصيص الاستجابة حسب المشاعر
+        dominant_emotion = max(emotions, key=emotions.get)
+        
+        if dominant_emotion == "sad" and emotions[dominant_emotion] > 0.6:
+            response = "أشعر أنك قد تمر بوقت صعب. " + intent_responses[0]
+        elif dominant_emotion == "happy" and emotions[dominant_emotion] > 0.6:
+            response = "يسعدني أن أراك في مزاج جيد! " + intent_responses[0]
         else:
-            # استجابة عامة ذكية
-            if emotions.get("sadness", 0) > 0.5:
-                return "أرى أنك تشعر بالحزن. هل تريد أن نتحدث عن ما يضايقك؟"
-            elif emotions.get("joy", 0) > 0.5:
-                return "يسعدني أن أراك في مزاج جيد! كيف يمكنني أن أساعدك؟"
-            else:
-                return "أفهم ما تقوله. هل يمكنك توضيح المزيد لأستطيع مساعدتك بشكل أفضل؟"
+            import random
+            response = random.choice(intent_responses)
+        
+        # إضافة معلومات عن الكيانات المستخرجة
+        if entities:
+            entity_texts = [entity['text'] for entity in entities]
+            response += f" لاحظت أنك ذكرت: {', '.join(entity_texts[:3])}."
+        
+        return response
     
     def _calculate_confidence(
-        self, 
-        text: str, 
-        intent: str, 
-        emotions: Dict[str, float]
+        self,
+        intent: str,
+        emotions: Dict[str, float],
+        entities: List[Dict[str, Any]]
     ) -> float:
-        """حساب مستوى الثقة في الاستجابة"""
+        """حساب مستوى الثقة"""
         
-        # عوامل الثقة
-        text_length_factor = min(len(text) / 100, 1.0)
-        intent_confidence = 0.8 if intent != "general" else 0.5
-        emotion_confidence = max(emotions.values()) if emotions else 0.5
+        base_confidence = 0.5
         
-        # حساب الثقة الإجمالية
-        confidence = (
-            text_length_factor * 0.3 +
-            intent_confidence * 0.4 +
-            emotion_confidence * 0.3
-        )
+        # زيادة الثقة للقصود الواضحة
+        clear_intents = ["greeting", "thanks", "goodbye"]
+        if intent in clear_intents:
+            base_confidence += 0.3
         
-        return min(confidence, 1.0)
+        # زيادة الثقة للمشاعر الواضحة
+        max_emotion_score = max(emotions.values()) if emotions else 0
+        base_confidence += max_emotion_score * 0.2
+        
+        # زيادة الثقة للكيانات المستخرجة
+        if entities:
+            avg_entity_confidence = sum(e['confidence'] for e in entities) / len(entities)
+            base_confidence += avg_entity_confidence * 0.1
+        
+        return min(base_confidence, 1.0)
     
     async def _generate_suggestions(
-        self, 
-        text: str, 
-        intent: str, 
-        user_id: str
-    ) -> List[str]:
-        """توليد اقتراحات للمتابعة"""
-        
-        suggestions = []
-        
-        if intent == "question":
-            suggestions.extend([
-                "هل تريد المزيد من التفاصيل؟",
-                "هل لديك أسئلة أخرى؟",
-                "هل تريد أمثلة عملية؟"
-            ])
-        elif intent == "request":
-            suggestions.extend([
-                "هل تريد خيارات أخرى؟",
-                "هل تحتاج مساعدة إضافية؟",
-                "هل هذا ما كنت تبحث عنه؟"
-            ])
-        else:
-            suggestions.extend([
-                "كيف يمكنني مساعدتك أكثر؟",
-                "هل تريد معرفة المزيد؟",
-                "هل لديك استفسارات أخرى؟"
-            ])
-        
-        return suggestions[:3]  # أقصى 3 اقتراحات
-    
-    async def _update_user_memory(
         self,
-        user_id: str,
-        input_text: str,
-        response_text: str,
-        emotions: Dict[str, float],
-        intent: str
-    ):
-        """تحديث ذاكرة المستخدم"""
+        intent: str,
+        context: Optional[Dict[str, Any]]
+    ) -> List[str]:
+        """توليد الاقتراحات"""
         
+        suggestions_map = {
+            "greeting": ["كيف يمكنني مساعدتك؟", "هل تريد أن نتحدث عن شيء معين؟"],
+            "thanks": ["هل تحتاج مساعدة أخرى؟", "ما رأيك في موضوع جديد؟"],
+            "goodbye": ["نراك قريباً!", "استمتع بباقي يومك!"],
+            "question": ["هل تريد المزيد من التفاصيل؟", "هل لديك أسئلة أخرى؟"],
+            "request": ["هل هذا ما كنت تبحث عنه؟", "هل تحتاج شيء آخر؟"]
+        }
+        
+        base_suggestions = suggestions_map.get(intent, ["كيف يمكنني مساعدتك أكثر؟"])
+        
+        # إضافة اقتراحات تعتمد على السياق
+        if context and "recent_topics" in context:
+            base_suggestions.append("هل تريد مواصلة موضوع سابق؟")
+        
+        return base_suggestions[:3]  # أقصى 3 اقتراحات
+    
+    def _get_or_create_user_profile(self, user_id: str) -> UserProfile:
+        """الحصول على ملف المستخدم أو إنشاؤه"""
         if user_id not in self.user_profiles:
             self.user_profiles[user_id] = UserProfile(
                 user_id=user_id,
                 preferences={},
                 interaction_history=[],
-                emotional_state={},
+                emotional_state={"neutral": 1.0},
                 learning_progress={},
                 goals=[],
                 last_updated=datetime.now()
             )
         
-        profile = self.user_profiles[user_id]
+        return self.user_profiles[user_id]
+    
+    def _update_user_profile(
+        self,
+        user_profile: UserProfile,
+        input_text: str,
+        response_text: str,
+        emotions: Dict[str, float],
+        intent: str
+    ):
+        """تحديث ملف المستخدم"""
         
-        # إضافة التفاعل الجديد
+        # إضافة التفاعل للتاريخ
         interaction = {
             "timestamp": datetime.now().isoformat(),
-            "input": input_text,
-            "response": response_text,
+            "input": input_text[:100],  # أول 100 حرف
+            "response": response_text[:100],
             "emotions": emotions,
             "intent": intent
         }
         
-        profile.interaction_history.append(interaction)
+        user_profile.interaction_history.append(interaction)
         
-        # الاحتفاظ بآخر 100 تفاعل فقط
-        if len(profile.interaction_history) > 100:
-            profile.interaction_history = profile.interaction_history[-100:]
+        # الحفاظ على آخر 50 تفاعل فقط
+        if len(user_profile.interaction_history) > 50:
+            user_profile.interaction_history = user_profile.interaction_history[-50:]
         
         # تحديث الحالة العاطفية
-        for emotion, value in emotions.items():
-            if emotion in profile.emotional_state:
-                profile.emotional_state[emotion] = (
-                    profile.emotional_state[emotion] * 0.8 + value * 0.2
+        for emotion, score in emotions.items():
+            if emotion in user_profile.emotional_state:
+                user_profile.emotional_state[emotion] = (
+                    user_profile.emotional_state[emotion] * 0.8 + score * 0.2
                 )
             else:
-                profile.emotional_state[emotion] = value
+                user_profile.emotional_state[emotion] = score
         
-        profile.last_updated = datetime.now()
-    
-    def _get_model_versions(self) -> Dict[str, str]:
-        """الحصول على إصدارات النماذج"""
-        return {
-            "engine_version": "1.0.0",
-            "models_loaded": list(self.models.keys()),
-            "memory_network": "neural_v1.0"
-        }
+        user_profile.last_updated = datetime.now()
     
     def _update_performance_stats(self, processing_time: float):
         """تحديث إحصائيات الأداء"""
-        self.performance_stats["total_requests"] += 1
+        total = self.performance_stats["total_requests"]
+        current_avg = self.performance_stats["average_response_time"]
         
-        # حساب متوسط وقت الاستجابة
-        current_avg = self.performance_stats["avg_response_time"]
-        total_requests = self.performance_stats["total_requests"]
-        
-        new_avg = (current_avg * (total_requests - 1) + processing_time) / total_requests
-        self.performance_stats["avg_response_time"] = new_avg
+        new_avg = (current_avg * (total - 1) + processing_time) / total
+        self.performance_stats["average_response_time"] = new_avg
+    
+    async def analyze_image(self, image_path: str) -> Dict[str, Any]:
+        """تحليل الصور المتقدم"""
+        try:
+            if not CV2_AVAILABLE:
+                return {"error": "مكتبات الرؤية الحاسوبية غير متاحة"}
+            
+            import cv2
+            
+            image = cv2.imread(image_path)
+            if image is None:
+                return {"error": "تعذر تحميل الصورة"}
+            
+            results = {
+                "image_size": image.shape,
+                "faces_detected": 0,
+                "objects_detected": [],
+                "colors_analysis": {},
+                "brightness": 0.0
+            }
+            
+            # كشف الوجوه
+            try:
+                if face_recognition:
+                    face_locations = face_recognition.face_locations(image)
+                    results["faces_detected"] = len(face_locations)
+                else:
+                    # استخدام OpenCV للكشف الأساسي
+                    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+                    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+                    faces = face_cascade.detectMultiScale(gray, 1.1, 4)
+                    results["faces_detected"] = len(faces)
+                    
+            except Exception as e:
+                self.logger.warning(f"خطأ في كشف الوجوه: {e}")
+            
+            # تحليل الألوان
+            try:
+                # متوسط الألوان
+                mean_color = np.mean(image, axis=(0, 1))
+                results["colors_analysis"] = {
+                    "dominant_blue": float(mean_color[0]),
+                    "dominant_green": float(mean_color[1]),
+                    "dominant_red": float(mean_color[2])
+                }
+                
+                # السطوع
+                gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+                results["brightness"] = float(np.mean(gray))
+                
+            except Exception as e:
+                self.logger.warning(f"خطأ في تحليل الألوان: {e}")
+            
+            return results
+            
+        except Exception as e:
+            return {"error": str(e)}
     
     async def save_memory(self):
-        """حفظ الذاكرة والملفات الشخصية"""
+        """حفظ الذاكرة والنماذج"""
         try:
-            # حفظ الشبكة العصبية
-            if self.memory_network:
-                memory_path = self.model_dir / "memory_network.pth"
-                torch.save({
-                    'model': self.memory_network.state_dict(),
-                    'optimizer': self.memory_optimizer.state_dict()
-                }, memory_path)
+            # حفظ الذاكرة العصبية
+            if self.neural_memory:
+                memory_path = self.model_dir / "neural_memory.pth"
+                torch.save(self.neural_memory.state_dict(), memory_path)
             
             # حفظ ملفات المستخدمين
             profiles_data = {}
@@ -666,50 +868,21 @@ class AdvancedAIEngine:
         except Exception as e:
             self.logger.error(f"❌ فشل حفظ الذاكرة: {e}")
     
-    async def analyze_image(self, image_path: str) -> Dict[str, Any]:
-        """تحليل الصور المتقدم"""
-        try:
-            image = cv2.imread(image_path)
-            if image is None:
-                return {"error": "فشل في تحميل الصورة"}
-            
-            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-            
-            # كشف الوجوه
-            faces = []
-            if 'face_cascade' in self.models:
-                detected_faces = self.models['face_cascade'].detectMultiScale(
-                    gray, scaleFactor=1.1, minNeighbors=5
-                )
-                
-                for (x, y, w, h) in detected_faces:
-                    faces.append({
-                        "x": int(x), "y": int(y),
-                        "width": int(w), "height": int(h),
-                        "confidence": 0.8
-                    })
-            
-            return {
-                "faces_detected": len(faces),
-                "faces": faces,
-                "image_size": {
-                    "width": image.shape[1],
-                    "height": image.shape[0]
-                }
-            }
-            
-        except Exception as e:
-            self.logger.error(f"خطأ في تحليل الصورة: {e}")
-            return {"error": str(e)}
-    
     def get_performance_report(self) -> Dict[str, Any]:
-        """تقرير أداء المحرك"""
+        """الحصول على تقرير الأداء"""
+        success_rate = (
+            self.performance_stats["successful_requests"] / 
+            max(self.performance_stats["total_requests"], 1)
+        ) * 100
+        
         return {
-            "performance_stats": self.performance_stats,
+            "total_requests": self.performance_stats["total_requests"],
+            "success_rate": f"{success_rate:.1f}%",
+            "average_response_time": f"{self.performance_stats['average_response_time']:.3f}s",
             "models_loaded": len(self.models),
-            "users_tracked": len(self.user_profiles),
-            "memory_network_active": self.memory_network is not None,
-            "is_initialized": self.is_initialized
+            "users_registered": len(self.user_profiles),
+            "memory_initialized": self.neural_memory is not None,
+            "device": str(self.device)
         }
 
 # مثيل عام لمحرك الذكاء الاصطناعي
@@ -722,33 +895,33 @@ async def get_ai_engine() -> AdvancedAIEngine:
     return ai_engine
 
 if __name__ == "__main__":
-    async def test_ai_engine():
+    async def main():
         """اختبار محرك الذكاء الاصطناعي"""
-        print("🧠 اختبار محرك الذكاء الاصطناعي المتقدم")
+        print("🧠 اختبار محرك الذكاء الاصطناعي المتطور")
         print("=" * 50)
         
         engine = await get_ai_engine()
         
-        # اختبار معالجة النص
-        test_texts = [
-            "مرحبا، كيف حالك؟",
-            "أريد معرفة حالة الطقس",
+        # اختبار المعالجة
+        test_inputs = [
+            "مرحباً، كيف حالك؟",
             "أشعر بالحزن اليوم",
-            "هل يمكنك مساعدتي في شيء؟"
+            "هل يمكنك مساعدتي في حل مشكلة؟",
+            "شكراً لك على المساعدة"
         ]
         
-        for text in test_texts:
-            print(f"\n💬 النص: {text}")
+        for text in test_inputs:
+            print(f"\n📝 الإدخال: {text}")
             response = await engine.process_natural_language(text)
-            print(f"🤖 الرد: {response.text}")
+            print(f"🤖 الاستجابة: {response.text}")
+            print(f"📊 الثقة: {response.confidence:.1%}")
+            print(f"🎭 المشاعر: {response.emotions}")
             print(f"🎯 القصد: {response.intent}")
-            print(f"💯 الثقة: {response.confidence:.2f}")
-            print(f"😊 المشاعر: {response.emotions}")
         
-        # تقرير الأداء
-        print(f"\n📊 تقرير الأداء:")
+        # عرض تقرير الأداء
+        print(f"\n📈 تقرير الأداء:")
         report = engine.get_performance_report()
         for key, value in report.items():
             print(f"   • {key}: {value}")
-
-    asyncio.run(test_ai_engine())
+    
+    asyncio.run(main())
