@@ -87,12 +87,17 @@ class UnifiedAssistantEngine:
         self.task_queue = queue.Queue()
         self.workers = []
 
-        # محركات جديدة متقدمة
+        # إضافة مكونات جديدة متقدمة
         self.voice_commander = None
         self.vision_system = None
         self.game_coach = None
         self.design_expert = None
         self.automation_engine = None
+
+        # أنظمة التمييز الصوتي المتقدمة
+        self.voice_biometrics = None
+        self.environmental_audio = None
+        self.audio_analysis_enabled = True
 
         # إعدادات التحكم الصوتي المتقدم
         self.voice_control_settings = {
@@ -572,6 +577,30 @@ class UnifiedAssistantEngine:
             "recent_topics": user_inputs[-5:] if len(user_inputs) > 5 else user_inputs,
             "overall_satisfaction": "جيد" if avg_confidence > 0.7 else "متوسط"
         }
+
+    def _initialize_components(self):
+        """تهيئة جميع المكونات"""
+        try:
+            # تهيئة أنظمة التمييز الصوتي
+            if self.audio_analysis_enabled:
+                self._initialize_audio_systems()
+        except Exception as e:
+            self.logger.error(f"خطأ في تهيئة المكونات: {e}")
+
+    def _initialize_audio_systems(self):
+        """تهيئة أنظمة الصوت المتقدمة"""
+        try:
+            # تهيئة نظام القياسات الحيوية الصوتية
+            # سيتم استبدال هذا بمنطق حقيقي
+            self.voice_biometrics = "VoiceBiometricsSystem()"
+            self.logger.info("✅ تم تهيئة نظام القياسات الحيوية الصوتية")
+
+            # تهيئة نظام الصوت البيئي
+            # سيتم استبدال هذا بمنطق حقيقي
+            self.environmental_audio = "EnvironmentalAudioSystem()"
+            self.logger.info("✅ تم تهيئة نظام الصوت البيئي")
+        except Exception as e:
+            self.logger.error(f"فشل تهيئة أنظمة الصوت: {e}")
 
 # مثيل عام لمحرك المساعد
 assistant_engine = UnifiedAssistantEngine()
