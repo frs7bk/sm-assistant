@@ -2,330 +2,522 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-محرك المساعد الذكي الموحد والمتقدم
-يدمج جميع الميزات المتقدمة في نظام واحد متماسك
+محرك المساعد الذكي الموحد
+يدمج جميع الوحدات والميزات في نظام واحد متقدم
 """
 
 import asyncio
 import logging
-import sys
+import json
+import time
+from typing import Dict, List, Optional, Any, Callable
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from datetime import datetime
+import threading
 from dataclasses import dataclass
-from enum import Enum
+import queue
+import sys
 
 # إضافة مسار المشروع
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-# استيراد نظام الإعدادات
 try:
-    from config.settings import get_settings, validate_environment
-    settings = get_settings()
+    from core.advanced_ai_engine import get_ai_engine, AIResponse
+    from core.module_manager import get_module_manager
+    AI_ENGINE_AVAILABLE = True
 except ImportError:
-    print("⚠️ تعذر تحميل الإعدادات، استخدام الإعدادات الافتراضية")
-    settings = None
+    AI_ENGINE_AVAILABLE = False
 
 @dataclass
-class ProcessingResult:
-    """نتيجة معالجة الأمر"""
-    status: str
-    message: str
-    data: Optional[Dict] = None
-    confidence: float = 0.0
-    suggestions: List[str] = None
-
-class AssistantMode(Enum):
-    """أوضاع المساعد المختلفة"""
-    NORMAL = "normal"
-    LEARNING = "learning"
-    ANALYSIS = "analysis"
-    PRODUCTIVITY = "productivity"
-    ENTERTAINMENT = "entertainment"
+class ConversationTurn:
+    """دورة المحادثة"""
+    timestamp: datetime
+    user_input: str
+    assistant_response: str
+    confidence: float
+    context: Dict[str, Any]
+    metadata: Dict[str, Any]
 
 class UnifiedAssistantEngine:
     """محرك المساعد الذكي الموحد"""
     
-    def __init__(self, config_path: Optional[str] = None):
-        """تهيئة المحرك مع جميع الوحدات المتقدمة"""
-        # تحميل الإعدادات أولاً
-        if settings:
-            self.settings = settings
-            if not validate_environment():
-                self.logger.warning("بعض الإعدادات غير صحيحة")
-        else:
-            self.settings = None
-            
-        self.setup_logging()
+    def __init__(self):
         self.logger = logging.getLogger(__name__)
         
-        # حالة المساعد
-        self.current_mode = AssistantMode.NORMAL
-        self.active_sessions = {}
-        self.processing_queue = asyncio.Queue()
+        # حالة المحرك
+        self.is_running = False
+        self.is_initialized = False
         
-        # إحصائيات الأداء
-        self.performance_stats = {
-            "total_commands": 0,
-            "successful_commands": 0,
-            "failed_commands": 0,
-            "average_response_time": 0.0
+        # المكونات الأساسية
+        self.ai_engine = None
+        self.module_manager = None
+        
+        # سياق المحادثة
+        self.conversation_history = []
+        self.current_session = {
+            "start_time": datetime.now(),
+            "user_id": "default",
+            "context": {},
+            "turn_count": 0
         }
         
-        # الوحدات الأساسية
-        self._init_core_modules()
-        
-        # الوحدات المتقدمة
-        self._init_ai_modules()
-        self._init_learning_modules()
-        self._init_analytics_modules()
-        
-        # معالجات الأوامر
-        self.command_processors = {
-            "nlu": self._process_nlu_command,
-            "vision": self._process_vision_command,
-            "learning": self._process_learning_command,
-            "analytics": self._process_analytics_command,
-            "productivity": self._process_productivity_command,
+        # الواجهات النشطة
+        self.active_interfaces = {
+            "text": True,
+            "voice": False,
+            "web": False,
+            "api": False
         }
         
-        self.logger.info("تم تهيئة محرك المساعد الموحد بنجاح")
-    
-    def setup_logging(self):
-        """إعداد نظام السجلات المتقدم"""
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.FileHandler('unified_assistant.log', encoding='utf-8'),
-                logging.StreamHandler(sys.stdout)
-            ]
-        )
-    
-    def _init_core_modules(self):
-        """تهيئة الوحدات الأساسية"""
-        try:
-            # محاولة تحميل الوحدات إذا كانت متوفرة
-            self.context_manager = None
-            self.security_monitor = None
-            self.user_manager = None
-            self.logger.info("تم تهيئة الوحدات الأساسية")
-        except ImportError as e:
-            self.logger.warning(f"بعض الوحدات الأساسية غير متوفرة: {e}")
-    
-    def _init_ai_modules(self):
-        """تهيئة وحدات الذكاء الاصطناعي"""
-        self.ai_modules = {}
+        # إحصائيات الجلسة
+        self.session_stats = {
+            "total_interactions": 0,
+            "successful_responses": 0,
+            "error_count": 0,
+            "avg_confidence": 0.0,
+            "session_duration": 0.0
+        }
         
-        # وحدة معالجة اللغة الطبيعية
-        try:
-            from ai_models.nlu.gpt4_interface import GPT4Responder
-            self.ai_modules['gpt4'] = None  # يحتاج API key
-            self.logger.info("وحدة GPT-4 جاهزة للتهيئة")
-        except ImportError:
-            self.logger.warning("وحدة GPT-4 غير متوفرة")
+        # قائمة انتظار المهام
+        self.task_queue = queue.Queue()
+        self.workers = []
         
-        # وحدة الرؤية الحاسوبية
-        self.ai_modules['vision'] = None
-        
-        # وحدة التعلم
-        try:
-            from ai_models.learning.active_learning import ActiveLearning
-            self.ai_modules['active_learning'] = ActiveLearning()
-            self.logger.info("وحدة التعلم النشط متاحة")
-        except ImportError:
-            self.logger.warning("وحدة التعلم النشط غير متوفرة")
-    
-    def _init_learning_modules(self):
-        """تهيئة وحدات التعلم المتقدمة"""
-        self.learning_modules = {}
+    async def initialize(self):
+        """تهيئة محرك المساعد"""
+        self.logger.info("🚀 تهيئة محرك المساعد الموحد...")
         
         try:
-            from ai_models.learning.reinforcement_engine import ReinforcementLearner
-            self.learning_modules['reinforcement'] = ReinforcementLearner()
-            self.logger.info("محرك التعلم المعزز متاح")
-        except ImportError:
-            self.logger.warning("محرك التعلم المعزز غير متوفر")
-        
-        try:
-            from ai_models.learning.few_shot_learner import FewShotLearner
-            self.learning_modules['few_shot'] = FewShotLearner()
-            self.logger.info("متعلم الأمثلة القليلة متاح")
-        except ImportError:
-            self.logger.warning("متعلم الأمثلة القليلة غير متوفر")
-    
-    def _init_analytics_modules(self):
-        """تهيئة وحدات التحليلات"""
-        self.analytics_modules = {}
-        self.logger.info("وحدات التحليلات جاهزة للتهيئة")
-    
-    async def process_command(self, command: str, user_id: str = None, context: Dict = None) -> ProcessingResult:
-        """معالجة متقدمة للأوامر مع دعم السياق والتعلم"""
-        try:
-            self.logger.info(f"معالجة الأمر: {command}")
-            
-            # تحليل نوع الأمر
-            command_type = self._classify_command(command)
-            
-            # معالجة حسب النوع
-            if command_type in self.command_processors:
-                result = await self.command_processors[command_type](command, user_id, context)
+            # تهيئة محرك الذكاء الاصطناعي
+            if AI_ENGINE_AVAILABLE:
+                self.ai_engine = await get_ai_engine()
+                self.logger.info("✅ تم تهيئة محرك الذكاء الاصطناعي")
             else:
-                result = await self._process_general_command(command, user_id, context)
+                self.logger.warning("⚠️ محرك الذكاء الاصطناعي غير متاح")
             
-            # تسجيل للتعلم
-            if self.learning_modules.get('reinforcement'):
-                self.learning_modules['reinforcement'].log_interaction(
-                    command, result.message, result.confidence
-                )
+            # تهيئة مدير الوحدات
+            self.module_manager = get_module_manager()
+            if not self.module_manager:
+                self.logger.warning("⚠️ مدير الوحدات غير متاح")
             
-            return result
+            # تهيئة العمال للمعالجة المتوازية
+            self._initialize_workers()
+            
+            self.is_initialized = True
+            self.logger.info("✅ تم تهيئة محرك المساعد بنجاح")
             
         except Exception as e:
-            self.logger.error(f"خطأ في معالجة الأمر: {str(e)}")
-            return ProcessingResult(
-                status="error",
-                message=f"حدث خطأ: {str(e)}",
-                confidence=0.0
+            self.logger.error(f"❌ فشل تهيئة محرك المساعد: {e}")
+            raise
+    
+    def _initialize_workers(self):
+        """تهيئة العمال للمعالجة المتوازية"""
+        num_workers = 2
+        
+        for i in range(num_workers):
+            worker = threading.Thread(
+                target=self._worker_thread,
+                name=f"AssistantWorker-{i}",
+                daemon=True
             )
-    
-    def _classify_command(self, command: str) -> str:
-        """تصنيف نوع الأمر باستخدام الذكاء الاصطناعي"""
-        command_lower = command.lower()
+            worker.start()
+            self.workers.append(worker)
         
-        # قواعد بسيطة للتصنيف - يمكن تطويرها لاحقاً
-        if any(keyword in command_lower for keyword in ['تحليل', 'رؤية', 'صورة', 'فيديو']):
-            return "vision"
-        elif any(keyword in command_lower for keyword in ['تعلم', 'تدريب', 'تحسين']):
-            return "learning"
-        elif any(keyword in command_lower for keyword in ['إحصائيات', 'تقرير', 'تحليلات']):
-            return "analytics"
-        elif any(keyword in command_lower for keyword in ['إنتاجية', 'مهمة', 'جدولة']):
-            return "productivity"
-        else:
-            return "nlu"
+        self.logger.info(f"تم تشغيل {num_workers} عامل للمعالجة")
     
-    async def _process_nlu_command(self, command: str, user_id: str, context: Dict) -> ProcessingResult:
-        """معالجة أوامر اللغة الطبيعية"""
-        if self.ai_modules.get('gpt4'):
-            # استخدام GPT-4 للمعالجة المتقدمة
-            response = "معالجة متقدمة بـ GPT-4"
-        else:
-            # معالجة أساسية
-            response = f"تم فهم أمرك: {command}"
+    def _worker_thread(self):
+        """خيط العامل للمعالجة"""
+        while True:
+            try:
+                task = self.task_queue.get(timeout=1)
+                if task is None:  # إشارة الإيقاف
+                    break
+                
+                # تنفيذ المهمة
+                task_func, args, kwargs = task
+                task_func(*args, **kwargs)
+                
+                self.task_queue.task_done()
+                
+            except queue.Empty:
+                continue
+            except Exception as e:
+                self.logger.error(f"خطأ في العامل: {e}")
+    
+    async def process_input(
+        self, 
+        user_input: str, 
+        input_type: str = "text",
+        user_id: str = "default",
+        context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """معالجة إدخال المستخدم"""
         
-        return ProcessingResult(
-            status="success",
-            message=response,
-            confidence=0.8,
-            suggestions=["هل تريد المزيد من التفاصيل؟"]
-        )
-    
-    async def _process_vision_command(self, command: str, user_id: str, context: Dict) -> ProcessingResult:
-        """معالجة أوامر الرؤية الحاسوبية"""
-        return ProcessingResult(
-            status="info",
-            message="وحدة الرؤية الحاسوبية قيد التطوير",
-            confidence=0.5
-        )
-    
-    async def _process_learning_command(self, command: str, user_id: str, context: Dict) -> ProcessingResult:
-        """معالجة أوامر التعلم"""
-        if self.learning_modules.get('active_learning'):
-            active_learner = self.learning_modules['active_learning']
-            # مثال على التعلم النشط
-            clarification = active_learner.suggest_clarification(command, ["خيار 1", "خيار 2"])
-            
-            return ProcessingResult(
-                status="learning",
-                message=clarification,
-                confidence=0.7
-            )
-        
-        return ProcessingResult(
-            status="info",
-            message="وحدات التعلم قيد التطوير",
-            confidence=0.5
-        )
-    
-    async def _process_analytics_command(self, command: str, user_id: str, context: Dict) -> ProcessingResult:
-        """معالجة أوامر التحليلات"""
-        return ProcessingResult(
-            status="info",
-            message="وحدة التحليلات المتقدمة قيد التطوير",
-            confidence=0.5,
-            suggestions=["لوحة التحكم", "تقارير مخصصة", "تحليل البيانات"]
-        )
-    
-    async def _process_productivity_command(self, command: str, user_id: str, context: Dict) -> ProcessingResult:
-        """معالجة أوامر الإنتاجية"""
-        return ProcessingResult(
-            status="success",
-            message="أدوات الإنتاجية متاحة للتطوير",
-            confidence=0.6,
-            suggestions=["إدارة المهام", "جدولة الاجتماعات", "تذكيرات ذكية"]
-        )
-    
-    async def _process_general_command(self, command: str, user_id: str, context: Dict) -> ProcessingResult:
-        """معالجة الأوامر العامة"""
-        return ProcessingResult(
-            status="success",
-            message=f"تم استلام أمرك: {command}",
-            confidence=0.7,
-            suggestions=["هل تحتاج مساعدة محددة؟"]
-        )
-    
-    async def start_interactive_session(self):
-        """بدء جلسة تفاعلية متقدمة"""
-        print("🤖 مرحباً! أنا المساعد الذكي المتقدم الموحد")
-        print("🎯 الميزات المتاحة:")
-        print("   • معالجة اللغة الطبيعية المتقدمة")
-        print("   • التعلم النشط والتكيفي")
-        print("   • التحليلات والتنبؤات")
-        print("   • أدوات الإنتاجية")
-        print("   • الرؤية الحاسوبية (قيد التطوير)")
-        print("\n💬 اكتب أمرك أو 'خروج' للإنهاء")
+        start_time = time.time()
         
         try:
-            while True:
-                user_input = input("\n👤 أدخل أمرك: ").strip()
+            self.logger.info(f"📝 معالجة الإدخال: {user_input[:50]}...")
+            
+            # تحديث سياق الجلسة
+            self.current_session["user_id"] = user_id
+            self.current_session["turn_count"] += 1
+            
+            if context:
+                self.current_session["context"].update(context)
+            
+            # معالجة الإدخال حسب النوع
+            if input_type == "text":
+                response = await self._process_text_input(user_input, user_id)
+            elif input_type == "voice":
+                response = await self._process_voice_input(user_input, user_id)
+            elif input_type == "image":
+                response = await self._process_image_input(user_input, user_id)
+            else:
+                response = await self._process_generic_input(user_input, user_id)
+            
+            # إنشاء دورة المحادثة
+            turn = ConversationTurn(
+                timestamp=datetime.now(),
+                user_input=user_input,
+                assistant_response=response.get("text", ""),
+                confidence=response.get("confidence", 0.0),
+                context=self.current_session["context"].copy(),
+                metadata={
+                    "input_type": input_type,
+                    "processing_time": time.time() - start_time,
+                    "user_id": user_id
+                }
+            )
+            
+            # إضافة إلى التاريخ
+            self.conversation_history.append(turn)
+            
+            # تحديث الإحصائيات
+            self._update_session_stats(turn)
+            
+            # إضافة معلومات إضافية للاستجابة
+            response.update({
+                "turn_id": len(self.conversation_history),
+                "session_info": {
+                    "turn_count": self.current_session["turn_count"],
+                    "session_duration": (datetime.now() - self.current_session["start_time"]).total_seconds()
+                },
+                "processing_time": time.time() - start_time
+            })
+            
+            return response
+            
+        except Exception as e:
+            self.logger.error(f"❌ خطأ في معالجة الإدخال: {e}")
+            self.session_stats["error_count"] += 1
+            
+            return {
+                "text": "عذراً، حدث خطأ في المعالجة. يرجى المحاولة مرة أخرى.",
+                "confidence": 0.0,
+                "intent": "error",
+                "suggestions": ["إعادة المحاولة", "تبسيط السؤال"],
+                "error": str(e)
+            }
+    
+    async def _process_text_input(self, text: str, user_id: str) -> Dict[str, Any]:
+        """معالجة النص"""
+        
+        if self.ai_engine:
+            # استخدام محرك الذكاء الاصطناعي المتقدم
+            ai_response = await self.ai_engine.process_natural_language(
+                text, user_id, self.current_session["context"]
+            )
+            
+            return {
+                "text": ai_response.text,
+                "confidence": ai_response.confidence,
+                "intent": ai_response.intent,
+                "emotions": ai_response.emotions,
+                "entities": ai_response.entities,
+                "suggestions": ai_response.suggestions,
+                "metadata": ai_response.metadata
+            }
+        else:
+            # معالجة أساسية
+            return await self._basic_text_processing(text)
+    
+    async def _basic_text_processing(self, text: str) -> Dict[str, Any]:
+        """معالجة نصية أساسية"""
+        
+        # تحليل أساسي للنص
+        text_lower = text.lower()
+        
+        # كشف القصد الأساسي
+        if any(word in text_lower for word in ["مرحبا", "أهلا", "سلام"]):
+            intent = "greeting"
+            response = "أهلاً وسهلاً! كيف يمكنني مساعدتك؟"
+            confidence = 0.9
+        elif any(word in text_lower for word in ["شكرا", "متشكر", "أشكرك"]):
+            intent = "thanks"
+            response = "عفواً! أسعدني أن أساعدك."
+            confidence = 0.9
+        elif any(word in text_lower for word in ["وداعا", "مع السلامة"]):
+            intent = "goodbye"
+            response = "وداعاً! أتمنى لك يوماً سعيداً."
+            confidence = 0.9
+        elif "؟" in text or any(word in text_lower for word in ["كيف", "ماذا", "متى", "أين"]):
+            intent = "question"
+            response = "سؤال جيد! أحاول أن أجد أفضل إجابة لك..."
+            confidence = 0.7
+        else:
+            intent = "general"
+            response = "أفهم ما تقوله. كيف يمكنني مساعدتك بشكل أفضل؟"
+            confidence = 0.5
+        
+        return {
+            "text": response,
+            "confidence": confidence,
+            "intent": intent,
+            "emotions": {"neutral": 1.0},
+            "entities": [],
+            "suggestions": [
+                "هل تريد المزيد من المساعدة؟",
+                "هل لديك أسئلة أخرى؟"
+            ]
+        }
+    
+    async def _process_voice_input(self, audio_data: str, user_id: str) -> Dict[str, Any]:
+        """معالجة الصوت"""
+        # مؤقتاً نعامل الصوت كنص
+        return await self._process_text_input(audio_data, user_id)
+    
+    async def _process_image_input(self, image_path: str, user_id: str) -> Dict[str, Any]:
+        """معالجة الصور"""
+        
+        if self.ai_engine:
+            try:
+                analysis = await self.ai_engine.analyze_image(image_path)
                 
-                if user_input.lower() in ['خروج', 'exit', 'quit']:
-                    print("👋 وداعاً!")
-                    break
+                if "error" in analysis:
+                    return {
+                        "text": f"عذراً، لم أستطع تحليل الصورة: {analysis['error']}",
+                        "confidence": 0.0,
+                        "intent": "error"
+                    }
+                
+                faces_count = analysis.get("faces_detected", 0)
+                
+                if faces_count > 0:
+                    response = f"أرى {faces_count} وجه في الصورة."
+                else:
+                    response = "لا أرى وجوه في هذه الصورة."
+                
+                return {
+                    "text": response,
+                    "confidence": 0.8,
+                    "intent": "image_analysis",
+                    "analysis_results": analysis
+                }
+                
+            except Exception as e:
+                return {
+                    "text": f"خطأ في تحليل الصورة: {str(e)}",
+                    "confidence": 0.0,
+                    "intent": "error"
+                }
+        else:
+            return {
+                "text": "عذراً، تحليل الصور غير متاح حالياً.",
+                "confidence": 0.0,
+                "intent": "unavailable"
+            }
+    
+    async def _process_generic_input(self, input_data: str, user_id: str) -> Dict[str, Any]:
+        """معالجة عامة للإدخال"""
+        return await self._process_text_input(input_data, user_id)
+    
+    def _update_session_stats(self, turn: ConversationTurn):
+        """تحديث إحصائيات الجلسة"""
+        self.session_stats["total_interactions"] += 1
+        
+        if turn.confidence > 0.5:
+            self.session_stats["successful_responses"] += 1
+        
+        # حساب متوسط الثقة
+        total = self.session_stats["total_interactions"]
+        current_avg = self.session_stats["avg_confidence"]
+        new_avg = (current_avg * (total - 1) + turn.confidence) / total
+        self.session_stats["avg_confidence"] = new_avg
+        
+        # مدة الجلسة
+        self.session_stats["session_duration"] = (
+            datetime.now() - self.current_session["start_time"]
+        ).total_seconds()
+    
+    async def start_interactive_session(self):
+        """بدء جلسة تفاعلية"""
+        self.logger.info("🎯 بدء الجلسة التفاعلية")
+        
+        if not self.is_initialized:
+            await self.initialize()
+        
+        self.is_running = True
+        
+        print("\n" + "="*60)
+        print("🤖 أهلاً بك في المساعد الذكي الموحد!")
+        print("="*60)
+        print("💡 نصائح:")
+        print("   • اكتب 'خروج' أو 'quit' للخروج")
+        print("   • اكتب 'إحصائيات' لعرض إحصائيات الجلسة")
+        print("   • اكتب 'مساعدة' لعرض الأوامر المتاحة")
+        print("="*60)
+        
+        while self.is_running:
+            try:
+                # الحصول على إدخال المستخدم
+                user_input = input("\n👤 أنت: ").strip()
                 
                 if not user_input:
                     continue
                 
-                result = await self.process_command(user_input)
+                # أوامر خاصة
+                if user_input.lower() in ['خروج', 'quit', 'exit']:
+                    await self._handle_exit()
+                    break
                 
-                # عرض النتيجة
-                status_emoji = {
-                    "success": "✅",
-                    "error": "❌", 
-                    "info": "ℹ️",
-                    "learning": "🎓"
-                }.get(result.status, "🤖")
+                elif user_input.lower() in ['إحصائيات', 'stats']:
+                    self._display_session_stats()
+                    continue
                 
-                print(f"\n{status_emoji} {result.message}")
+                elif user_input.lower() in ['مساعدة', 'help']:
+                    self._display_help()
+                    continue
                 
-                if result.confidence > 0:
-                    print(f"🎯 الثقة: {result.confidence:.1%}")
+                elif user_input.lower() in ['تنظيف', 'clear']:
+                    self._clear_conversation()
+                    continue
                 
-                if result.suggestions:
-                    print("💡 اقتراحات:")
-                    for suggestion in result.suggestions:
-                        print(f"   • {suggestion}")
+                # معالجة الإدخال
+                print("🤖 المساعد: يفكر...")
                 
-        except KeyboardInterrupt:
-            print("\n\n👋 تم إنهاء الجلسة")
+                response = await self.process_input(user_input)
+                
+                # عرض الاستجابة
+                print(f"\n🤖 المساعد: {response['text']}")
+                
+                # عرض معلومات إضافية إذا كانت متاحة
+                if response.get('confidence', 0) < 0.7:
+                    print(f"   💭 (مستوى الثقة: {response['confidence']:.1%})")
+                
+                if response.get('suggestions'):
+                    print("   💡 اقتراحات:")
+                    for suggestion in response['suggestions'][:2]:
+                        print(f"      • {suggestion}")
+                
+            except KeyboardInterrupt:
+                await self._handle_exit()
+                break
+            except Exception as e:
+                self.logger.error(f"خطأ في الجلسة التفاعلية: {e}")
+                print(f"\n❌ حدث خطأ: {str(e)}")
+    
+    def _display_session_stats(self):
+        """عرض إحصائيات الجلسة"""
+        print("\n📊 إحصائيات الجلسة:")
+        print(f"   • إجمالي التفاعلات: {self.session_stats['total_interactions']}")
+        print(f"   • الاستجابات الناجحة: {self.session_stats['successful_responses']}")
+        print(f"   • متوسط الثقة: {self.session_stats['avg_confidence']:.1%}")
+        print(f"   • مدة الجلسة: {self.session_stats['session_duration']:.1f} ثانية")
+        print(f"   • عدد الأخطاء: {self.session_stats['error_count']}")
+    
+    def _display_help(self):
+        """عرض المساعدة"""
+        print("\n❓ الأوامر المتاحة:")
+        print("   • خروج / quit - إنهاء الجلسة")
+        print("   • إحصائيات / stats - عرض إحصائيات الجلسة")
+        print("   • مساعدة / help - عرض هذه المساعدة")
+        print("   • تنظيف / clear - مسح تاريخ المحادثة")
+        
+        if self.ai_engine:
+            print("\n🎯 الميزات المتاحة:")
+            print("   • معالجة اللغة الطبيعية المتقدمة")
+            print("   • تحليل المشاعر والكيانات")
+            print("   • ذاكرة المحادثة الذكية")
+            print("   • اقتراحات تفاعلية")
+    
+    def _clear_conversation(self):
+        """مسح تاريخ المحادثة"""
+        self.conversation_history.clear()
+        self.current_session["turn_count"] = 0
+        print("✅ تم مسح تاريخ المحادثة")
+    
+    async def _handle_exit(self):
+        """معالجة الخروج"""
+        print("\n👋 شكراً لاستخدام المساعد الذكي!")
+        
+        # عرض ملخص الجلسة
+        if self.session_stats["total_interactions"] > 0:
+            print("\n📈 ملخص الجلسة:")
+            self._display_session_stats()
+        
+        # حفظ البيانات
+        await self._save_session_data()
+        
+        self.is_running = False
+    
+    async def _save_session_data(self):
+        """حفظ بيانات الجلسة"""
+        try:
+            if self.ai_engine:
+                await self.ai_engine.save_memory()
+            
+            # حفظ تاريخ المحادثة
+            session_data = {
+                "session_id": self.current_session["start_time"].isoformat(),
+                "user_id": self.current_session["user_id"],
+                "stats": self.session_stats,
+                "conversation_count": len(self.conversation_history)
+            }
+            
+            sessions_dir = Path("data/sessions")
+            sessions_dir.mkdir(parents=True, exist_ok=True)
+            
+            session_file = sessions_dir / f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            
+            with open(session_file, 'w', encoding='utf-8') as f:
+                json.dump(session_data, f, ensure_ascii=False, indent=2)
+            
+            self.logger.info("تم حفظ بيانات الجلسة")
+            
         except Exception as e:
-            self.logger.error(f"خطأ في الجلسة التفاعلية: {str(e)}")
+            self.logger.error(f"خطأ في حفظ بيانات الجلسة: {e}")
+    
+    def get_conversation_summary(self) -> Dict[str, Any]:
+        """الحصول على ملخص المحادثة"""
+        if not self.conversation_history:
+            return {"message": "لا يوجد محادثات"}
+        
+        # تحليل المحادثة
+        total_turns = len(self.conversation_history)
+        avg_confidence = sum(turn.confidence for turn in self.conversation_history) / total_turns
+        
+        # استخراج الموضوعات الرئيسية
+        user_inputs = [turn.user_input for turn in self.conversation_history]
+        
+        return {
+            "total_turns": total_turns,
+            "avg_confidence": avg_confidence,
+            "session_duration": self.session_stats["session_duration"],
+            "recent_topics": user_inputs[-5:] if len(user_inputs) > 5 else user_inputs,
+            "overall_satisfaction": "جيد" if avg_confidence > 0.7 else "متوسط"
+        }
 
-async def main():
-    """الدالة الرئيسية للتشغيل"""
-    engine = UnifiedAssistantEngine()
-    await engine.start_interactive_session()
+# مثيل عام لمحرك المساعد
+assistant_engine = UnifiedAssistantEngine()
+
+def get_assistant_engine() -> UnifiedAssistantEngine:
+    """الحصول على محرك المساعد"""
+    return assistant_engine
 
 if __name__ == "__main__":
+    async def main():
+        """تشغيل المساعد"""
+        engine = get_assistant_engine()
+        await engine.start_interactive_session()
+    
     asyncio.run(main())

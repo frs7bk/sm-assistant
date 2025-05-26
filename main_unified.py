@@ -20,13 +20,24 @@ sys.path.insert(0, str(project_root))
 # الاستيرادات الأساسية
 try:
     from config.settings import get_settings, validate_environment
-    from core.module_manager import get_module_manager
-    from core.unified_assistant_engine import UnifiedAssistantEngine
-    
     settings_available = True
 except ImportError as e:
-    print(f"⚠️ تعذر تحميل بعض الوحدات: {e}")
+    print(f"⚠️ تعذر تحميل الإعدادات: {e}")
     settings_available = False
+
+try:
+    from core.module_manager import get_module_manager
+    module_manager_available = True
+except ImportError as e:
+    print(f"⚠️ تعذر تحميل مدير الوحدات: {e}")
+    module_manager_available = False
+
+try:
+    from core.unified_assistant_engine import get_assistant_engine
+    assistant_engine_available = True
+except ImportError as e:
+    print(f"⚠️ تعذر تحميل محرك المساعد: {e}")
+    assistant_engine_available = False
 
 class UnifiedAssistantRunner:
     """مشغل المساعد الذكي الموحد"""
@@ -87,17 +98,24 @@ class UnifiedAssistantRunner:
                 self.logger.warning("⚠️ تشغيل بدون ملف الإعدادات")
             
             # 2. تهيئة مدير الوحدات
-            self.module_manager = get_module_manager()
-            successful, total = await self.module_manager.load_all_modules()
-            
-            if successful > 0:
-                self.logger.info(f"✅ تم تحميل {successful}/{total} وحدة")
+            if module_manager_available:
+                self.module_manager = get_module_manager()
+                successful, total = await self.module_manager.load_all_modules()
+                
+                if successful > 0:
+                    self.logger.info(f"✅ تم تحميل {successful}/{total} وحدة")
+                else:
+                    self.logger.warning("⚠️ لم يتم تحميل أي وحدة - التشغيل في الوضع الأساسي")
             else:
-                self.logger.warning("⚠️ لم يتم تحميل أي وحدة - التشغيل في الوضع الأساسي")
+                self.logger.warning("⚠️ مدير الوحدات غير متاح")
             
             # 3. تهيئة محرك المساعد
-            self.assistant_engine = UnifiedAssistantEngine()
-            self.logger.info("✅ تم تهيئة محرك المساعد")
+            if assistant_engine_available:
+                self.assistant_engine = get_assistant_engine()
+                await self.assistant_engine.initialize()
+                self.logger.info("✅ تم تهيئة محرك المساعد")
+            else:
+                self.logger.warning("⚠️ محرك المساعد غير متاح - التشغيل في الوضع الأساسي")
             
             # 4. عرض تقرير التهيئة
             await self.show_initialization_report()
@@ -178,7 +196,11 @@ class UnifiedAssistantRunner:
         
         try:
             # تشغيل الواجهة التفاعلية
-            await self.assistant_engine.start_interactive_session()
+            if self.assistant_engine:
+                await self.assistant_engine.start_interactive_session()
+            else:
+                # وضع أساسي للتشغيل
+                await self._basic_interactive_mode()
             
         except KeyboardInterrupt:
             self.logger.info("تم إيقاف المساعد بواسطة المستخدم")
@@ -213,6 +235,44 @@ class UnifiedAssistantRunner:
         
         self.logger.info(f"🌐 بدء الواجهة الويب على المنفذ {self.settings.interface.web_port}")
         # سيتم تطوير هذا لاحقاً
+    
+    async def _basic_interactive_mode(self):
+        """وضع تفاعلي أساسي عندما لا تتوفر الميزات المتقدمة"""
+        print("\n" + "="*60)
+        print("🤖 المساعد الذكي - الوضع الأساسي")
+        print("="*60)
+        print("⚠️ بعض الميزات المتقدمة غير متاحة")
+        print("💡 اكتب 'خروج' للخروج")
+        print("="*60)
+        
+        while True:
+            try:
+                user_input = input("\n👤 أنت: ").strip()
+                
+                if user_input.lower() in ['خروج', 'quit', 'exit']:
+                    print("👋 وداعاً!")
+                    break
+                
+                if not user_input:
+                    continue
+                
+                # استجابة أساسية
+                if any(word in user_input.lower() for word in ["مرحبا", "أهلا", "سلام"]):
+                    response = "أهلاً وسهلاً! كيف يمكنني مساعدتك؟"
+                elif any(word in user_input.lower() for word in ["شكرا", "متشكر"]):
+                    response = "عفواً! أسعدني أن أساعدك."
+                elif any(word in user_input.lower() for word in ["وداعا", "مع السلامة"]):
+                    response = "وداعاً! أتمنى لك يوماً سعيداً."
+                else:
+                    response = "أفهم ما تقوله. الميزات المتقدمة ستكون متاحة قريباً!"
+                
+                print(f"🤖 المساعد: {response}")
+                
+            except KeyboardInterrupt:
+                print("\n👋 وداعاً!")
+                break
+            except Exception as e:
+                print(f"❌ خطأ: {str(e)}")
     
     def get_status(self) -> dict:
         """الحصول على حالة المساعد"""
