@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Project specific
+data/cache/
+data/logs/
+*.log
+.env
+temp/
+misc/
+
+# Models and large files
+*.pth
+*.h5
+*.pkl
+data/models/*.bin
+
+# Temporary files
+*.tmp
+*.temp
