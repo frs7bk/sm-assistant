@@ -3,302 +3,509 @@
 # -*- coding: utf-8 -*-
 """
 معالج البيانات الضخمة باستخدام Dask
-نظام متقدم للمعالجة المتوازية والموزعة
+يوفر قدرات متقدمة لمعالجة وتحليل البيانات الضخمة
 """
 
-import dask.dataframe as dd
-import dask.array as da
+import asyncio
+import logging
 import pandas as pd
 import numpy as np
-from dask.distributed import Client, as_completed
-from dask.diagnostics import ProgressBar
-import logging
-from typing import Dict, List, Any, Optional
-import asyncio
 from pathlib import Path
+from typing import Dict, Any, List, Optional, Union
+import json
+from datetime import datetime, timedelta
+import warnings
 
-class AdvancedDaskProcessor:
-    """معالج البيانات الضخمة المتقدم باستخدام Dask"""
+# تجاهل التحذيرات غير المهمة
+warnings.filterwarnings('ignore')
+
+try:
+    import dask
+    import dask.dataframe as dd
+    import dask.array as da
+    from dask.distributed import Client, as_completed
+    from dask import delayed
+    DASK_AVAILABLE = True
+except ImportError:
+    DASK_AVAILABLE = False
+    print("⚠️ Dask غير متاح - سيتم استخدام Pandas العادي")
+
+class DaskProcessor:
+    """معالج البيانات الضخمة المتقدم"""
     
-    def __init__(self, scheduler_address: Optional[str] = None):
-        """تهيئة معالج Dask"""
+    def __init__(self):
+        """تهيئة المعالج"""
         self.logger = logging.getLogger(__name__)
+        self.client: Optional[Client] = None
+        self.data_dir = Path("data")
+        self.cache_dir = self.data_dir / "cache"
+        self.results_dir = self.data_dir / "analysis_results"
         
-        # إعداد عميل Dask
-        if scheduler_address:
-            self.client = Client(scheduler_address)
-        else:
-            self.client = Client(processes=True, threads_per_worker=2)
+        # إنشاء المجلدات
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.results_dir.mkdir(parents=True, exist_ok=True)
         
-        self.logger.info(f"تم تهيئة معالج Dask: {self.client.dashboard_link}")
+        # إحصائيات
+        self.processing_stats = {
+            "total_processed": 0,
+            "processing_time": 0.0,
+            "memory_used": 0,
+            "cache_hits": 0
+        }
+        
+        # تكوين Dask
+        if DASK_AVAILABLE:
+            dask.config.set({
+                'dataframe.query-planning': True,
+                'array.slicing.split_large_chunks': True
+            })
     
-    async def process_large_dataset(self, data_path: str, chunk_size: str = "100MB") -> Dict[str, Any]:
-        """معالجة مجموعة بيانات ضخمة"""
+    async def initialize(self):
+        """تهيئة عميل Dask"""
         try:
-            # قراءة البيانات بشكل كسول
-            if data_path.endswith('.csv'):
-                df = dd.read_csv(data_path, blocksize=chunk_size)
-            elif data_path.endswith('.parquet'):
-                df = dd.read_parquet(data_path)
-            elif data_path.endswith('.json'):
-                df = dd.read_json(data_path, blocksize=chunk_size)
+            if DASK_AVAILABLE:
+                self.client = Client(processes=False, silence_logs=False)
+                self.logger.info(f"تم تهيئة عميل Dask: {self.client.dashboard_link}")
             else:
-                raise ValueError(f"تنسيق ملف غير مدعوم: {data_path}")
+                self.logger.warning("Dask غير متاح - سيتم استخدام المعالجة التسلسلية")
+        except Exception as e:
+            self.logger.error(f"خطأ في تهيئة Dask: {e}")
+    
+    async def cleanup(self):
+        """تنظيف الموارد"""
+        try:
+            if self.client:
+                await self.client.close()
+                self.logger.info("تم إغلاق عميل Dask")
+        except Exception as e:
+            self.logger.error(f"خطأ في تنظيف Dask: {e}")
+    
+    async def process_large_dataset(
+        self, 
+        file_path: Union[str, Path], 
+        chunk_size: int = 10000,
+        operations: List[str] = None
+    ) -> Dict[str, Any]:
+        """معالجة مجموعة بيانات كبيرة"""
+        start_time = datetime.now()
+        
+        try:
+            file_path = Path(file_path)
             
-            # تحليل أساسي
-            with ProgressBar():
-                analysis_results = {
-                    'total_rows': len(df),
-                    'total_columns': len(df.columns),
-                    'memory_usage': df.memory_usage(deep=True).sum().compute(),
-                    'data_types': dict(df.dtypes),
-                    'null_counts': df.isnull().sum().compute().to_dict(),
-                    'basic_stats': df.describe().compute().to_dict()
-                }
+            # التحقق من وجود الملف
+            if not file_path.exists():
+                return {"error": f"الملف غير موجود: {file_path}"}
             
-            self.logger.info(f"تم تحليل {analysis_results['total_rows']} صف")
-            return analysis_results
+            # تحديد نوع الملف
+            if file_path.suffix.lower() == '.csv':
+                result = await self._process_csv_file(file_path, chunk_size, operations)
+            elif file_path.suffix.lower() in ['.json', '.jsonl']:
+                result = await self._process_json_file(file_path, operations)
+            elif file_path.suffix.lower() in ['.xlsx', '.xls']:
+                result = await self._process_excel_file(file_path, operations)
+            else:
+                return {"error": f"نوع الملف غير مدعوم: {file_path.suffix}"}
+            
+            # حساب الوقت المستغرق
+            processing_time = (datetime.now() - start_time).total_seconds()
+            result["processing_time"] = processing_time
+            
+            # تحديث الإحصائيات
+            self.processing_stats["total_processed"] += 1
+            self.processing_stats["processing_time"] += processing_time
+            
+            return result
             
         except Exception as e:
             self.logger.error(f"خطأ في معالجة البيانات: {e}")
-            return {}
+            return {"error": str(e)}
     
-    async def advanced_analytics(self, df: dd.DataFrame) -> Dict[str, Any]:
-        """تحليلات متقدمة للبيانات"""
+    async def _process_csv_file(
+        self, 
+        file_path: Path, 
+        chunk_size: int,
+        operations: List[str]
+    ) -> Dict[str, Any]:
+        """معالجة ملف CSV"""
         try:
-            results = {}
-            
-            # تحليل الارتباطات
-            numeric_cols = df.select_dtypes(include=[np.number]).columns
-            if len(numeric_cols) > 1:
-                with ProgressBar():
-                    correlation_matrix = df[numeric_cols].corr().compute()
-                    results['correlations'] = correlation_matrix.to_dict()
-            
-            # تحليل القيم المفقودة
-            missing_data = df.isnull().sum().compute()
-            results['missing_data_analysis'] = {
-                'total_missing': int(missing_data.sum()),
-                'missing_by_column': missing_data.to_dict(),
-                'missing_percentage': (missing_data / len(df) * 100).to_dict()
-            }
-            
-            # تحليل التوزيعات
-            if len(numeric_cols) > 0:
-                distributions = {}
-                for col in numeric_cols[:5]:  # أول 5 أعمدة رقمية
-                    with ProgressBar():
-                        col_data = df[col].compute()
-                        distributions[col] = {
-                            'mean': float(col_data.mean()),
-                            'std': float(col_data.std()),
-                            'skewness': float(col_data.skew()),
-                            'kurtosis': float(col_data.kurtosis())
-                        }
-                results['distributions'] = distributions
-            
-            return results
-            
-        except Exception as e:
-            self.logger.error(f"خطأ في التحليلات المتقدمة: {e}")
-            return {}
-    
-    async def machine_learning_pipeline(self, df: dd.DataFrame, target_column: str) -> Dict[str, Any]:
-        """خط إنتاج تعلم آلي للبيانات الضخمة"""
-        try:
-            from dask_ml.model_selection import train_test_split
-            from dask_ml.linear_model import LinearRegression
-            from dask_ml.ensemble import RandomForestRegressor
-            from dask_ml.preprocessing import StandardScaler
-            
-            # تحضير البيانات
-            numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-            if target_column in numeric_cols:
-                numeric_cols.remove(target_column)
-            
-            X = df[numeric_cols]
-            y = df[target_column]
-            
-            # تقسيم البيانات
-            X_train, X_test, y_train, y_test = train_test_split(
-                X, y, test_size=0.2, random_state=42
-            )
-            
-            # تطبيع البيانات
-            scaler = StandardScaler()
-            X_train_scaled = scaler.fit_transform(X_train)
-            X_test_scaled = scaler.transform(X_test)
-            
-            # تدريب نماذج متعددة
-            models = {
-                'linear_regression': LinearRegression(),
-                'random_forest': RandomForestRegressor(n_estimators=100, random_state=42)
-            }
-            
-            results = {}
-            
-            for model_name, model in models.items():
-                with ProgressBar():
-                    # تدريب النموذج
-                    model.fit(X_train_scaled, y_train)
-                    
-                    # التنبؤ والتقييم
-                    train_score = model.score(X_train_scaled, y_train).compute()
-                    test_score = model.score(X_test_scaled, y_test).compute()
-                    
-                    results[model_name] = {
-                        'train_score': float(train_score),
-                        'test_score': float(test_score)
-                    }
-            
-            return results
-            
-        except Exception as e:
-            self.logger.error(f"خطأ في خط الإنتاج: {e}")
-            return {}
-    
-    async def time_series_analysis(self, df: dd.DataFrame, time_column: str, value_column: str) -> Dict[str, Any]:
-        """تحليل السلاسل الزمنية"""
-        try:
-            # تحويل عمود الوقت
-            df[time_column] = dd.to_datetime(df[time_column])
-            df = df.set_index(time_column)
-            
-            # تجميع البيانات حسب فترات زمنية
-            daily_data = df[value_column].resample('D').mean().compute()
-            weekly_data = df[value_column].resample('W').mean().compute()
-            monthly_data = df[value_column].resample('M').mean().compute()
-            
-            # اتجاهات وأنماط
-            results = {
-                'trend_analysis': {
-                    'daily_trend': float(daily_data.pct_change().mean()),
-                    'weekly_trend': float(weekly_data.pct_change().mean()),
-                    'monthly_trend': float(monthly_data.pct_change().mean())
-                },
-                'seasonality': {
-                    'daily_volatility': float(daily_data.std()),
-                    'weekly_volatility': float(weekly_data.std()),
-                    'monthly_volatility': float(monthly_data.std())
-                },
-                'summary_stats': {
-                    'total_data_points': len(daily_data),
-                    'date_range': {
-                        'start': str(daily_data.index.min()),
-                        'end': str(daily_data.index.max())
+            if DASK_AVAILABLE:
+                # استخدام Dask للملفات الكبيرة
+                df = dd.read_csv(str(file_path), blocksize=f"{chunk_size}KB")
+                
+                # العمليات الأساسية
+                result = {
+                    "file_info": {
+                        "path": str(file_path),
+                        "size_mb": file_path.stat().st_size / (1024 * 1024),
+                        "partitions": df.npartitions
+                    },
+                    "basic_stats": {
+                        "total_rows": len(df),
+                        "total_columns": len(df.columns),
+                        "columns": list(df.columns)
                     }
                 }
-            }
+                
+                # تنفيذ العمليات المطلوبة
+                if operations:
+                    for operation in operations:
+                        if operation == "describe":
+                            result["description"] = df.describe().compute().to_dict()
+                        elif operation == "null_counts":
+                            result["null_counts"] = df.isnull().sum().compute().to_dict()
+                        elif operation == "data_types":
+                            result["data_types"] = df.dtypes.to_dict()
+                        elif operation == "memory_usage":
+                            result["memory_usage"] = df.memory_usage(deep=True).compute().to_dict()
+                
+            else:
+                # استخدام Pandas العادي
+                df = pd.read_csv(file_path, chunksize=chunk_size)
+                
+                # معالجة البيانات على دفعات
+                total_rows = 0
+                columns = None
+                
+                for chunk in df:
+                    total_rows += len(chunk)
+                    if columns is None:
+                        columns = list(chunk.columns)
+                
+                result = {
+                    "file_info": {
+                        "path": str(file_path),
+                        "size_mb": file_path.stat().st_size / (1024 * 1024)
+                    },
+                    "basic_stats": {
+                        "total_rows": total_rows,
+                        "total_columns": len(columns),
+                        "columns": columns
+                    }
+                }
             
-            return results
+            return result
             
         except Exception as e:
-            self.logger.error(f"خطأ في تحليل السلاسل الزمنية: {e}")
-            return {}
+            self.logger.error(f"خطأ في معالجة CSV: {e}")
+            return {"error": str(e)}
     
-    async def cluster_analysis(self, df: dd.DataFrame, n_clusters: int = 5) -> Dict[str, Any]:
-        """تحليل التجميع للبيانات الضخمة"""
+    async def _process_json_file(self, file_path: Path, operations: List[str]) -> Dict[str, Any]:
+        """معالجة ملف JSON"""
         try:
-            from dask_ml.cluster import KMeans
-            from dask_ml.preprocessing import StandardScaler
+            # قراءة الملف
+            with open(file_path, 'r', encoding='utf-8') as f:
+                if file_path.suffix.lower() == '.jsonl':
+                    # JSON Lines
+                    data = [json.loads(line) for line in f]
+                else:
+                    # JSON عادي
+                    data = json.load(f)
             
-            # اختيار الأعمدة الرقمية
-            numeric_cols = df.select_dtypes(include=[np.number]).columns
-            X = df[numeric_cols]
+            # تحليل البيانات
+            if isinstance(data, list):
+                result = {
+                    "file_info": {
+                        "path": str(file_path),
+                        "size_mb": file_path.stat().st_size / (1024 * 1024),
+                        "type": "array"
+                    },
+                    "basic_stats": {
+                        "total_items": len(data),
+                        "sample_keys": list(data[0].keys()) if data and isinstance(data[0], dict) else None
+                    }
+                }
+            else:
+                result = {
+                    "file_info": {
+                        "path": str(file_path),
+                        "size_mb": file_path.stat().st_size / (1024 * 1024),
+                        "type": "object"
+                    },
+                    "basic_stats": {
+                        "keys": list(data.keys()) if isinstance(data, dict) else None
+                    }
+                }
             
-            # تطبيع البيانات
-            scaler = StandardScaler()
-            X_scaled = scaler.fit_transform(X)
-            
-            # تطبيق K-Means
-            kmeans = KMeans(n_clusters=n_clusters, random_state=42)
-            
-            with ProgressBar():
-                clusters = kmeans.fit_predict(X_scaled)
-                cluster_centers = kmeans.cluster_centers_
-            
-            # تحليل المجموعات
-            unique_clusters, counts = da.unique(clusters, return_counts=True)
-            cluster_counts = dict(zip(unique_clusters.compute(), counts.compute()))
-            
-            results = {
-                'n_clusters': n_clusters,
-                'cluster_counts': cluster_counts,
-                'cluster_centers': cluster_centers.tolist(),
-                'total_samples': len(clusters)
-            }
-            
-            return results
+            return result
             
         except Exception as e:
-            self.logger.error(f"خطأ في تحليل التجميع: {e}")
-            return {}
+            self.logger.error(f"خطأ في معالجة JSON: {e}")
+            return {"error": str(e)}
     
-    def get_performance_stats(self) -> Dict[str, Any]:
-        """إحصائيات الأداء"""
+    async def _process_excel_file(self, file_path: Path, operations: List[str]) -> Dict[str, Any]:
+        """معالجة ملف Excel"""
         try:
-            return {
-                'dashboard_link': self.client.dashboard_link,
-                'workers': len(self.client.scheduler_info()['workers']),
-                'total_cores': sum(w['ncores'] for w in self.client.scheduler_info()['workers'].values()),
-                'total_memory': sum(w['memory_limit'] for w in self.client.scheduler_info()['workers'].values()),
-                'active_tasks': len(self.client.processing()),
-                'completed_tasks': self.client.call_stack(),
+            # قراءة معلومات الأوراق
+            excel_file = pd.ExcelFile(file_path)
+            sheets = excel_file.sheet_names
+            
+            result = {
+                "file_info": {
+                    "path": str(file_path),
+                    "size_mb": file_path.stat().st_size / (1024 * 1024),
+                    "sheets": sheets
+                },
+                "sheets_data": {}
             }
+            
+            # معالجة كل ورقة
+            for sheet in sheets[:5]:  # معالجة أول 5 أوراق فقط
+                df = pd.read_excel(file_path, sheet_name=sheet)
+                
+                result["sheets_data"][sheet] = {
+                    "rows": len(df),
+                    "columns": len(df.columns),
+                    "column_names": list(df.columns)
+                }
+            
+            return result
+            
         except Exception as e:
-            self.logger.error(f"خطأ في إحصائيات الأداء: {e}")
-            return {}
+            self.logger.error(f"خطأ في معالجة Excel: {e}")
+            return {"error": str(e)}
     
-    def __del__(self):
-        """تنظيف الموارد"""
-        if hasattr(self, 'client'):
-            self.client.close()
+    async def analyze_sample_data(self) -> str:
+        """تحليل بيانات عينة لأغراض التجربة"""
+        try:
+            # إنشاء بيانات عينة
+            sample_data = await self._create_sample_data()
+            
+            # تحليل البيانات
+            analysis_results = await self._analyze_dataframe(sample_data)
+            
+            # إنشاء تقرير
+            report = self._generate_analysis_report(analysis_results)
+            
+            return report
+            
+        except Exception as e:
+            self.logger.error(f"خطأ في تحليل البيانات العينة: {e}")
+            return f"❌ خطأ في التحليل: {e}"
+    
+    async def _create_sample_data(self) -> pd.DataFrame:
+        """إنشاء بيانات عينة للتجربة"""
+        np.random.seed(42)
+        
+        # إنشاء بيانات متنوعة
+        n_samples = 10000
+        
+        data = {
+            'user_id': range(1, n_samples + 1),
+            'age': np.random.randint(18, 80, n_samples),
+            'income': np.random.normal(50000, 15000, n_samples),
+            'education_level': np.random.choice(['ثانوي', 'جامعي', 'دراسات عليا'], n_samples),
+            'city': np.random.choice(['الرياض', 'جدة', 'الدمام', 'مكة', 'المدينة'], n_samples),
+            'satisfaction_score': np.random.uniform(1, 10, n_samples),
+            'purchase_frequency': np.random.poisson(5, n_samples),
+            'registration_date': pd.date_range('2020-01-01', periods=n_samples, freq='H')
+        }
+        
+        return pd.DataFrame(data)
+    
+    async def _analyze_dataframe(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """تحليل مفصل لإطار البيانات"""
+        analysis = {}
+        
+        # الإحصائيات الأساسية
+        analysis['basic_info'] = {
+            'shape': df.shape,
+            'memory_usage': df.memory_usage(deep=True).sum(),
+            'dtypes': df.dtypes.to_dict()
+        }
+        
+        # الإحصائيات الوصفية
+        numeric_columns = df.select_dtypes(include=[np.number]).columns
+        if len(numeric_columns) > 0:
+            analysis['descriptive_stats'] = df[numeric_columns].describe().to_dict()
+        
+        # تحليل القيم المفقودة
+        analysis['missing_values'] = df.isnull().sum().to_dict()
+        
+        # تحليل البيانات الفئوية
+        categorical_columns = df.select_dtypes(include=['object']).columns
+        analysis['categorical_analysis'] = {}
+        
+        for col in categorical_columns:
+            analysis['categorical_analysis'][col] = {
+                'unique_values': df[col].nunique(),
+                'most_frequent': df[col].mode().iloc[0] if not df[col].empty else None,
+                'value_counts': df[col].value_counts().head().to_dict()
+            }
+        
+        # تحليل التوزيعات
+        analysis['distributions'] = {}
+        for col in numeric_columns:
+            analysis['distributions'][col] = {
+                'mean': float(df[col].mean()),
+                'median': float(df[col].median()),
+                'std': float(df[col].std()),
+                'skewness': float(df[col].skew()),
+                'kurtosis': float(df[col].kurtosis())
+            }
+        
+        # تحليل الارتباطات
+        if len(numeric_columns) > 1:
+            correlation_matrix = df[numeric_columns].corr()
+            analysis['correlations'] = correlation_matrix.to_dict()
+        
+        return analysis
+    
+    def _generate_analysis_report(self, analysis: Dict[str, Any]) -> str:
+        """إنشاء تقرير تحليل شامل"""
+        report = f"""
+📊 تقرير تحليل البيانات الضخمة
+{'='*50}
 
-# مثال للاستخدام
-async def main():
-    """مثال شامل لاستخدام معالج البيانات الضخمة"""
-    processor = AdvancedDaskProcessor()
+📈 معلومات أساسية:
+   • عدد الصفوف: {analysis['basic_info']['shape'][0]:,}
+   • عدد الأعمدة: {analysis['basic_info']['shape'][1]}
+   • استخدام الذاكرة: {analysis['basic_info']['memory_usage'] / 1024 / 1024:.2f} ميجابايت
+
+🔍 تحليل القيم المفقودة:
+"""
+        
+        missing_values = analysis.get('missing_values', {})
+        for col, missing_count in missing_values.items():
+            if missing_count > 0:
+                report += f"   • {col}: {missing_count} قيمة مفقودة\n"
+        
+        if not any(missing_values.values()):
+            report += "   ✅ لا توجد قيم مفقودة\n"
+        
+        # تحليل البيانات الرقمية
+        if 'descriptive_stats' in analysis:
+            report += f"\n📊 الإحصائيات الوصفية للأعمدة الرقمية:\n"
+            for col, stats in analysis['descriptive_stats'].items():
+                report += f"""   • {col}:
+     - المتوسط: {stats['mean']:.2f}
+     - الوسيط: {stats['50%']:.2f}
+     - الانحراف المعياري: {stats['std']:.2f}
+"""
+        
+        # تحليل البيانات الفئوية
+        if 'categorical_analysis' in analysis:
+            report += f"\n📋 تحليل البيانات الفئوية:\n"
+            for col, cat_stats in analysis['categorical_analysis'].items():
+                report += f"""   • {col}:
+     - قيم فريدة: {cat_stats['unique_values']}
+     - الأكثر تكراراً: {cat_stats['most_frequent']}
+"""
+        
+        # الارتباطات
+        if 'correlations' in analysis:
+            report += f"\n🔗 أقوى الارتباطات:\n"
+            correlations = analysis['correlations']
+            
+            # العثور على أقوى الارتباطات
+            strong_correlations = []
+            for col1 in correlations:
+                for col2 in correlations[col1]:
+                    if col1 != col2:
+                        corr_value = correlations[col1][col2]
+                        if abs(corr_value) > 0.5:
+                            strong_correlations.append((col1, col2, corr_value))
+            
+            for col1, col2, corr in sorted(strong_correlations, key=lambda x: abs(x[2]), reverse=True)[:5]:
+                report += f"   • {col1} ↔ {col2}: {corr:.3f}\n"
+        
+        # الخلاصة والتوصيات
+        report += f"""
+💡 خلاصة التحليل:
+   • جودة البيانات: {'ممتازة' if not any(missing_values.values()) else 'جيدة مع بعض القيم المفقودة'}
+   • تنوع البيانات: {'مرتفع' if len(analysis.get('categorical_analysis', {})) > 2 else 'متوسط'}
+   • إمكانية التحليل: عالية ✅
+
+📌 التوصيات:
+   • يمكن استخدام هذه البيانات لبناء نماذج تنبؤية
+   • الارتباطات القوية تشير إلى إمكانيات تحليل متقدمة
+   • البيانات جاهزة للتحليلات الإحصائية المتطورة
+"""
+        
+        return report
+    
+    async def process_user_behavior_data(self, user_data: Dict[str, Any]) -> Dict[str, Any]:
+        """معالجة بيانات سلوك المستخدم"""
+        try:
+            # تحويل البيانات إلى DataFrame
+            df = pd.DataFrame([user_data])
+            
+            # تحليل البيانات
+            analysis = {
+                "user_profile": {
+                    "interactions": user_data.get("interactions", 0),
+                    "session_duration": user_data.get("session_duration", 0),
+                    "preferences": user_data.get("preferences", {})
+                },
+                "behavior_patterns": await self._analyze_behavior_patterns(user_data),
+                "recommendations": await self._generate_recommendations(user_data)
+            }
+            
+            return analysis
+            
+        except Exception as e:
+            self.logger.error(f"خطأ في معالجة بيانات المستخدم: {e}")
+            return {"error": str(e)}
+    
+    async def _analyze_behavior_patterns(self, user_data: Dict[str, Any]) -> Dict[str, Any]:
+        """تحليل أنماط السلوك"""
+        patterns = {}
+        
+        # تحليل نشاط المستخدم
+        interactions = user_data.get("interactions", 0)
+        if interactions > 0:
+            patterns["activity_level"] = (
+                "عالي" if interactions > 100 else
+                "متوسط" if interactions > 50 else
+                "منخفض"
+            )
+        
+        # تحليل أوقات الاستخدام
+        current_hour = datetime.now().hour
+        if 6 <= current_hour < 12:
+            patterns["usage_time"] = "صباحي"
+        elif 12 <= current_hour < 18:
+            patterns["usage_time"] = "بعد الظهر"
+        elif 18 <= current_hour < 24:
+            patterns["usage_time"] = "مسائي"
+        else:
+            patterns["usage_time"] = "ليلي"
+        
+        return patterns
+    
+    async def _generate_recommendations(self, user_data: Dict[str, Any]) -> List[str]:
+        """توليد توصيات للمستخدم"""
+        recommendations = []
+        
+        interactions = user_data.get("interactions", 0)
+        
+        if interactions < 10:
+            recommendations.append("جرب استكشاف المزيد من الميزات المتاحة")
+            recommendations.append("اطلع على دليل المستخدم للاستفادة القصوى")
+        
+        if interactions > 50:
+            recommendations.append("يمكنك الآن استخدام الميزات المتقدمة")
+            recommendations.append("جرب أنظمة التحليل والتوقع")
+        
+        # إضافة توصيات عامة
+        recommendations.append("احرص على تحديث تفضيلاتك بانتظام")
+        recommendations.append("استخدم ميزة التعلم النشط لتحسين الأداء")
+        
+        return recommendations
+
+# اختبار المعالج
+async def test_dask_processor():
+    """اختبار معالج البيانات الضخمة"""
+    processor = DaskProcessor()
     
     try:
-        # مثال لمعالجة ملف CSV ضخم
-        print("🔍 تحليل البيانات الضخمة...")
+        await processor.initialize()
         
-        # إنشاء بيانات تجريبية ضخمة
-        import pandas as pd
-        large_data = pd.DataFrame({
-            'id': range(1000000),
-            'value1': np.random.randn(1000000),
-            'value2': np.random.randn(1000000) * 100,
-            'category': np.random.choice(['A', 'B', 'C'], 1000000),
-            'timestamp': pd.date_range('2020-01-01', periods=1000000, freq='1min')
-        })
-        large_data.to_csv('big_data_sample.csv', index=False)
+        # اختبار تحليل البيانات العينة
+        result = await processor.analyze_sample_data()
+        print(result)
         
-        # تحليل البيانات
-        analysis = await processor.process_large_dataset('big_data_sample.csv')
-        print(f"📊 نتائج التحليل: {analysis}")
-        
-        # قراءة البيانات مرة أخرى للتحليلات المتقدمة
-        df = dd.read_csv('big_data_sample.csv')
-        
-        # تحليلات متقدمة
-        advanced_results = await processor.advanced_analytics(df)
-        print(f"🔬 التحليلات المتقدمة: {advanced_results}")
-        
-        # تحليل السلاسل الزمنية
-        ts_results = await processor.time_series_analysis(df, 'timestamp', 'value1')
-        print(f"📈 تحليل السلاسل الزمنية: {ts_results}")
-        
-        # إحصائيات الأداء
-        perf_stats = processor.get_performance_stats()
-        print(f"⚡ إحصائيات الأداء: {perf_stats}")
-        
-    except Exception as e:
-        print(f"❌ خطأ: {e}")
-    
     finally:
-        # تنظيف الملفات التجريبية
-        Path('big_data_sample.csv').unlink(missing_ok=True)
+        await processor.cleanup()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(test_dask_processor())

@@ -2,41 +2,35 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-نظام التكوين المتقدم للمساعد الذكي
-يدير جميع إعدادات النظام بطريقة ديناميكية ومرنة
+ملف التكوين المتقدم للمساعد الذكي الموحد
+يحتوي على جميع الإعدادات والتكوينات المتقدمة
 """
 
+import os
 import json
 import yaml
-import os
-import logging
 from pathlib import Path
-from typing import Dict, Any, Optional, Union, List
-from dataclasses import dataclass, asdict
-from enum import Enum
-import importlib.util
+from typing import Dict, Any, Optional, List
+from dataclasses import dataclass, field
+from dotenv import load_dotenv
+import logging
 
-class ConfigType(Enum):
-    """أنواع ملفات التكوين"""
-    JSON = "json"
-    YAML = "yaml"
-    ENV = "env"
-    PYTHON = "py"
+# تحميل متغيرات البيئة
+load_dotenv()
 
 @dataclass
 class AIModelConfig:
     """تكوين نماذج الذكاء الاصطناعي"""
     openai_api_key: str = ""
     huggingface_api_key: str = ""
-    model_cache_dir: str = "data/models"
+    claude_api_key: str = ""
+    model_name: str = "gpt-4"
     max_tokens: int = 2048
     temperature: float = 0.7
-    enable_fine_tuning: bool = False
-    custom_models: Dict[str, str] = None
-    
-    def __post_init__(self):
-        if self.custom_models is None:
-            self.custom_models = {}
+    timeout: int = 30
+    retry_attempts: int = 3
+    use_cache: bool = True
+    cache_ttl: int = 3600
 
 @dataclass
 class DatabaseConfig:
@@ -44,9 +38,9 @@ class DatabaseConfig:
     sqlite_path: str = "data/assistant.db"
     redis_url: str = "redis://localhost:6379"
     mongodb_uri: str = "mongodb://localhost:27017/assistant"
+    use_redis: bool = False
+    use_mongodb: bool = False
     backup_interval: int = 24  # ساعات
-    enable_encryption: bool = True
-    max_connections: int = 100
 
 @dataclass
 class SecurityConfig:
@@ -54,279 +48,310 @@ class SecurityConfig:
     encryption_key: str = ""
     jwt_secret: str = ""
     session_secret: str = ""
-    rate_limit_per_minute: int = 60
-    enable_2fa: bool = False
-    allowed_hosts: List[str] = None
-    
-    def __post_init__(self):
-        if self.allowed_hosts is None:
-            self.allowed_hosts = ["localhost", "127.0.0.1"]
-
-@dataclass
-class InterfaceConfig:
-    """تكوين الواجهات"""
-    enable_web: bool = True
-    enable_voice: bool = True
-    enable_vision: bool = True
-    enable_api: bool = True
-    web_port: int = 5000
-    api_port: int = 8000
-    host: str = "0.0.0.0"
-    voice_language: str = "ar-SA"
-    camera_index: int = 0
-
-@dataclass
-class LearningConfig:
-    """تكوين التعلم الآلي"""
-    enable_active_learning: bool = True
-    enable_reinforcement: bool = True
-    memory_size: int = 1000
-    learning_rate: float = 0.01
-    confidence_threshold: float = 0.8
-    auto_save_interval: int = 300  # ثواني
+    max_login_attempts: int = 5
+    session_timeout: int = 3600
+    enable_encryption: bool = True
+    secure_cookies: bool = True
 
 @dataclass
 class PerformanceConfig:
     """تكوين الأداء"""
     max_concurrent_requests: int = 10
     request_timeout: int = 30
-    cache_ttl: int = 3600  # ثواني
-    enable_gpu: bool = False
-    max_memory_usage: str = "2GB"
-    cleanup_interval: int = 7  # أيام
+    memory_limit_mb: int = 1024
+    cpu_limit_percent: int = 80
+    enable_caching: bool = True
+    cache_size_mb: int = 256
+    log_performance: bool = True
 
-class AdvancedConfigManager:
-    """مدير التكوين المتقدم"""
+@dataclass
+class VoiceConfig:
+    """تكوين الصوت"""
+    language: str = "ar-SA"
+    speed: int = 150
+    volume: float = 0.9
+    voice_engine: str = "pyttsx3"
+    enable_voice_recognition: bool = True
+    enable_voice_synthesis: bool = True
+    noise_reduction: bool = True
+
+@dataclass
+class VisionConfig:
+    """تكوين الرؤية"""
+    camera_index: int = 0
+    detection_confidence: float = 0.5
+    max_image_size_mb: int = 10
+    supported_formats: List[str] = field(default_factory=lambda: ["jpg", "jpeg", "png", "bmp"])
+    enable_face_recognition: bool = True
+    enable_object_detection: bool = True
+    enable_ocr: bool = True
+
+@dataclass
+class LearningConfig:
+    """تكوين التعلم"""
+    learning_rate: float = 0.01
+    memory_size: int = 1000
+    active_learning_threshold: float = 0.8
+    enable_continuous_learning: bool = True
+    save_interactions: bool = True
+    model_update_interval: int = 7  # أيام
+
+@dataclass
+class AnalyticsConfig:
+    """تكوين التحليلات"""
+    enable_analytics: bool = True
+    big_data_processing: bool = True
+    enable_predictions: bool = True
+    enable_recommendations: bool = True
+    data_retention_days: int = 365
+    anonymize_data: bool = True
+
+@dataclass
+class InterfaceConfig:
+    """تكوين الواجهات"""
+    web_port: int = 5000
+    streamlit_port: int = 8501
+    dash_port: int = 8050
+    host: str = "0.0.0.0"
+    enable_web_interface: bool = True
+    enable_api: bool = True
+    api_rate_limit: int = 1000  # طلبات في الساعة
+
+class AdvancedConfig:
+    """إدارة التكوين المتقدم"""
     
-    def __init__(self, config_dir: str = "config"):
-        self.config_dir = Path(config_dir)
-        self.config_dir.mkdir(exist_ok=True)
+    def __init__(self, config_file: Optional[str] = None):
+        """تهيئة التكوين"""
+        self.config_file = config_file or "config/settings.yaml"
+        self.config_dir = Path("config")
+        self.data_dir = Path("data")
         
+        # إنشاء المجلدات
+        self.config_dir.mkdir(exist_ok=True)
+        self.data_dir.mkdir(exist_ok=True)
+        
+        # تهيئة السجلات
         self.logger = logging.getLogger(__name__)
         
-        # التكوينات
+        # تحميل التكوين
         self.ai_models = AIModelConfig()
         self.database = DatabaseConfig()
         self.security = SecurityConfig()
-        self.interface = InterfaceConfig()
-        self.learning = LearningConfig()
         self.performance = PerformanceConfig()
+        self.voice = VoiceConfig()
+        self.vision = VisionConfig()
+        self.learning = LearningConfig()
+        self.analytics = AnalyticsConfig()
+        self.interface = InterfaceConfig()
         
-        # إعدادات عامة
-        self.debug_mode = False
-        self.log_level = "INFO"
-        self.language = "ar"
-        self.project_root = Path.cwd()
+        # تحميل التكوين من الملفات
+        self.load_config()
         
-        # تحميل التكوينات
-        self.load_all_configs()
+        # تحميل متغيرات البيئة
+        self.load_environment_variables()
+        
+        # التحقق من صحة التكوين
+        self.validate_config()
     
-    def load_all_configs(self):
-        """تحميل جميع ملفات التكوين"""
+    def load_config(self):
+        """تحميل التكوين من الملفات"""
         try:
-            # تحميل من متغيرات البيئة
-            self._load_from_env()
+            # تحميل من YAML
+            yaml_file = Path(self.config_file)
+            if yaml_file.exists():
+                with open(yaml_file, 'r', encoding='utf-8') as f:
+                    config_data = yaml.safe_load(f)
+                    self.apply_config_data(config_data)
+                    self.logger.info(f"تم تحميل التكوين من: {yaml_file}")
             
-            # تحميل من ملفات JSON/YAML
-            self._load_from_files()
+            # تحميل من JSON
+            json_file = self.config_dir / "settings.json"
+            if json_file.exists():
+                with open(json_file, 'r', encoding='utf-8') as f:
+                    config_data = json.load(f)
+                    self.apply_config_data(config_data)
+                    self.logger.info(f"تم تحميل التكوين من: {json_file}")
+                    
+        except Exception as e:
+            self.logger.warning(f"خطأ في تحميل التكوين: {e}")
+    
+    def load_environment_variables(self):
+        """تحميل متغيرات البيئة"""
+        try:
+            # مفاتيح API
+            self.ai_models.openai_api_key = os.getenv("OPENAI_API_KEY", "")
+            self.ai_models.huggingface_api_key = os.getenv("HUGGINGFACE_API_KEY", "")
+            self.ai_models.claude_api_key = os.getenv("CLAUDE_API_KEY", "")
             
-            # التحقق من صحة التكوين
-            self.validate_config()
+            # قواعد البيانات
+            self.database.redis_url = os.getenv("REDIS_URL", self.database.redis_url)
+            self.database.mongodb_uri = os.getenv("MONGODB_URI", self.database.mongodb_uri)
             
-            self.logger.info("✅ تم تحميل جميع التكوينات بنجاح")
+            # الأمان
+            self.security.encryption_key = os.getenv("ENCRYPTION_KEY", "")
+            self.security.jwt_secret = os.getenv("JWT_SECRET_KEY", "")
+            self.security.session_secret = os.getenv("SESSION_SECRET", "")
+            
+            # الواجهات
+            self.interface.web_port = int(os.getenv("WEB_PORT", self.interface.web_port))
+            self.interface.host = os.getenv("HOST", self.interface.host)
+            
+            # الإعدادات العامة
+            debug = os.getenv("DEBUG", "false").lower() == "true"
+            if debug:
+                logging.getLogger().setLevel(logging.DEBUG)
+            
+            self.logger.info("تم تحميل متغيرات البيئة")
             
         except Exception as e:
-            self.logger.error(f"❌ خطأ في تحميل التكوينات: {e}")
+            self.logger.error(f"خطأ في تحميل متغيرات البيئة: {e}")
     
-    def _load_from_env(self):
-        """تحميل التكوين من متغيرات البيئة"""
-        # تكوين الذكاء الاصطناعي
-        self.ai_models.openai_api_key = os.getenv("OPENAI_API_KEY", "")
-        self.ai_models.huggingface_api_key = os.getenv("HUGGINGFACE_API_KEY", "")
-        
-        # تكوين قواعد البيانات
-        self.database.sqlite_path = os.getenv("DATABASE_URL", self.database.sqlite_path)
-        self.database.redis_url = os.getenv("REDIS_URL", self.database.redis_url)
-        self.database.mongodb_uri = os.getenv("MONGODB_URI", self.database.mongodb_uri)
-        
-        # تكوين الأمان
-        self.security.encryption_key = os.getenv("ENCRYPTION_KEY", "")
-        self.security.jwt_secret = os.getenv("JWT_SECRET_KEY", "")
-        self.security.session_secret = os.getenv("SESSION_SECRET", "")
-        
-        # تكوين الواجهات
-        self.interface.web_port = int(os.getenv("WEB_PORT", self.interface.web_port))
-        self.interface.host = os.getenv("HOST", self.interface.host)
-        self.interface.voice_language = os.getenv("VOICE_LANGUAGE", self.interface.voice_language)
-        
-        # إعدادات عامة
-        self.debug_mode = os.getenv("DEBUG", "false").lower() == "true"
-        self.log_level = os.getenv("LOG_LEVEL", self.log_level)
-        self.language = os.getenv("LANGUAGE", self.language)
-    
-    def _load_from_files(self):
-        """تحميل التكوين من الملفات"""
-        config_files = {
-            "ai_models.json": self.ai_models,
-            "database.yaml": self.database,
-            "security.json": self.security,
-            "interface.yaml": self.interface,
-            "learning.json": self.learning,
-            "performance.yaml": self.performance
-        }
-        
-        for filename, config_obj in config_files.items():
-            file_path = self.config_dir / filename
+    def apply_config_data(self, config_data: Dict[str, Any]):
+        """تطبيق بيانات التكوين"""
+        try:
+            # تطبيق تكوين نماذج الذكاء الاصطناعي
+            if "ai_models" in config_data:
+                ai_config = config_data["ai_models"]
+                for key, value in ai_config.items():
+                    if hasattr(self.ai_models, key):
+                        setattr(self.ai_models, key, value)
             
-            if file_path.exists():
-                try:
-                    if filename.endswith('.json'):
-                        data = self._load_json(file_path)
-                    elif filename.endswith('.yaml'):
-                        data = self._load_yaml(file_path)
-                    else:
-                        continue
-                    
-                    # تحديث التكوين
-                    for key, value in data.items():
+            # تطبيق تكوين قاعدة البيانات
+            if "database" in config_data:
+                db_config = config_data["database"]
+                for key, value in db_config.items():
+                    if hasattr(self.database, key):
+                        setattr(self.database, key, value)
+            
+            # تطبيق باقي التكوينات
+            config_mappings = {
+                "security": self.security,
+                "performance": self.performance,
+                "voice": self.voice,
+                "vision": self.vision,
+                "learning": self.learning,
+                "analytics": self.analytics,
+                "interface": self.interface
+            }
+            
+            for section, config_obj in config_mappings.items():
+                if section in config_data:
+                    section_config = config_data[section]
+                    for key, value in section_config.items():
                         if hasattr(config_obj, key):
                             setattr(config_obj, key, value)
-                    
-                    self.logger.info(f"تم تحميل {filename}")
-                    
-                except Exception as e:
-                    self.logger.warning(f"خطأ في تحميل {filename}: {e}")
+                            
+        except Exception as e:
+            self.logger.error(f"خطأ في تطبيق التكوين: {e}")
     
-    def _load_json(self, file_path: Path) -> Dict[str, Any]:
-        """تحميل ملف JSON"""
-        with open(file_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    
-    def _load_yaml(self, file_path: Path) -> Dict[str, Any]:
-        """تحميل ملف YAML"""
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                return yaml.safe_load(f)
-        except ImportError:
-            self.logger.warning("PyYAML غير مثبت - تخطي ملفات YAML")
-            return {}
-    
-    def validate_config(self) -> List[str]:
+    def validate_config(self):
         """التحقق من صحة التكوين"""
-        issues = []
+        errors = []
         
         # التحقق من مفاتيح API
         if not self.ai_models.openai_api_key:
-            issues.append("openai_api_key")
+            errors.append("مفتاح OpenAI API مفقود")
         
-        if not self.security.encryption_key:
-            issues.append("encryption_key")
+        # التحقق من مفاتيح الأمان
+        if self.security.enable_encryption and not self.security.encryption_key:
+            errors.append("مفتاح التشفير مفقود")
         
-        if not self.security.jwt_secret:
-            issues.append("jwt_secret")
+        # التحقق من حدود الأداء
+        if self.performance.memory_limit_mb < 512:
+            errors.append("حد الذاكرة منخفض جداً (أقل من 512 ميجابايت)")
         
-        # التحقق من المسارات
-        if not Path(self.ai_models.model_cache_dir).exists():
-            Path(self.ai_models.model_cache_dir).mkdir(parents=True, exist_ok=True)
+        # التحقق من منافذ الواجهات
+        if not (1024 <= self.interface.web_port <= 65535):
+            errors.append("منفذ الويب غير صحيح")
         
-        # التحقق من المنافذ
-        if not (1000 <= self.interface.web_port <= 65535):
-            issues.append("web_port")
-        
-        if issues:
-            self.logger.warning(f"⚠️ مشاكل في التكوين: {', '.join(issues)}")
-        
-        return issues
+        # عرض التحذيرات
+        if errors:
+            self.logger.warning("مشاكل في التكوين:")
+            for error in errors:
+                self.logger.warning(f"  - {error}")
+        else:
+            self.logger.info("التحقق من التكوين: ✅ نجح")
     
-    def save_config(self, config_name: str, config_type: ConfigType = ConfigType.JSON):
-        """حفظ تكوين معين"""
+    def save_config(self):
+        """حفظ التكوين الحالي"""
         try:
-            config_map = {
-                "ai_models": self.ai_models,
-                "database": self.database,
-                "security": self.security,
-                "interface": self.interface,
-                "learning": self.learning,
-                "performance": self.performance
+            config_data = {
+                "ai_models": self.ai_models.__dict__,
+                "database": self.database.__dict__,
+                "security": {k: v for k, v in self.security.__dict__.items() 
+                           if k not in ["encryption_key", "jwt_secret", "session_secret"]},
+                "performance": self.performance.__dict__,
+                "voice": self.voice.__dict__,
+                "vision": self.vision.__dict__,
+                "learning": self.learning.__dict__,
+                "analytics": self.analytics.__dict__,
+                "interface": self.interface.__dict__
             }
             
-            if config_name not in config_map:
-                raise ValueError(f"تكوين غير معروف: {config_name}")
+            # حفظ في YAML
+            yaml_file = Path(self.config_file)
+            with open(yaml_file, 'w', encoding='utf-8') as f:
+                yaml.dump(config_data, f, default_flow_style=False, allow_unicode=True)
             
-            config_obj = config_map[config_name]
-            file_path = self.config_dir / f"{config_name}.{config_type.value}"
-            
-            data = asdict(config_obj)
-            
-            if config_type == ConfigType.JSON:
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    json.dump(data, f, ensure_ascii=False, indent=2)
-            elif config_type == ConfigType.YAML:
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    yaml.dump(data, f, allow_unicode=True, default_flow_style=False)
-            
-            self.logger.info(f"تم حفظ تكوين {config_name}")
+            self.logger.info(f"تم حفظ التكوين في: {yaml_file}")
             
         except Exception as e:
             self.logger.error(f"خطأ في حفظ التكوين: {e}")
     
-    def save_all_configs(self):
-        """حفظ جميع التكوينات"""
-        configs = ["ai_models", "database", "security", "interface", "learning", "performance"]
-        
-        for config_name in configs:
-            self.save_config(config_name)
-    
-    def get_config_summary(self) -> Dict[str, Any]:
+    def get_config_summary(self) -> str:
         """الحصول على ملخص التكوين"""
-        return {
-            "project_root": str(self.project_root),
-            "debug_mode": self.debug_mode,
-            "language": self.language,
-            "ai_models_configured": bool(self.ai_models.openai_api_key),
-            "security_configured": bool(self.security.encryption_key),
-            "interfaces_enabled": {
-                "web": self.interface.enable_web,
-                "voice": self.interface.enable_voice,
-                "vision": self.interface.enable_vision,
-                "api": self.interface.enable_api
-            },
-            "learning_enabled": {
-                "active": self.learning.enable_active_learning,
-                "reinforcement": self.learning.enable_reinforcement
-            }
-        }
+        summary = f"""
+🔧 ملخص تكوين المساعد الذكي
+{'='*40}
+🧠 نماذج الذكاء الاصطناعي:
+   • النموذج الأساسي: {self.ai_models.model_name}
+   • OpenAI: {'✅' if self.ai_models.openai_api_key else '❌'}
+   • HuggingFace: {'✅' if self.ai_models.huggingface_api_key else '❌'}
+   • Claude: {'✅' if self.ai_models.claude_api_key else '❌'}
+
+💾 قواعد البيانات:
+   • SQLite: ✅ {self.database.sqlite_path}
+   • Redis: {'✅' if self.database.use_redis else '❌'}
+   • MongoDB: {'✅' if self.database.use_mongodb else '❌'}
+
+🔒 الأمان:
+   • التشفير: {'✅' if self.security.enable_encryption else '❌'}
+   • الجلسات الآمنة: {'✅' if self.security.secure_cookies else '❌'}
+
+⚡ الأداء:
+   • الحد الأقصى للطلبات: {self.performance.max_concurrent_requests}
+   • حد الذاكرة: {self.performance.memory_limit_mb} ميجابايت
+   • التخزين المؤقت: {'✅' if self.performance.enable_caching else '❌'}
+
+🗣️ الصوت:
+   • اللغة: {self.voice.language}
+   • التعرف على الصوت: {'✅' if self.voice.enable_voice_recognition else '❌'}
+   • تركيب الصوت: {'✅' if self.voice.enable_voice_synthesis else '❌'}
+
+👁️ الرؤية:
+   • كاميرا: كاميرا {self.vision.camera_index}
+   • التعرف على الوجوه: {'✅' if self.vision.enable_face_recognition else '❌'}
+   • اكتشاف الكائنات: {'✅' if self.vision.enable_object_detection else '❌'}
+
+🧠 التعلم:
+   • التعلم المستمر: {'✅' if self.learning.enable_continuous_learning else '❌'}
+   • حفظ التفاعلات: {'✅' if self.learning.save_interactions else '❌'}
+
+📊 التحليلات:
+   • البيانات الضخمة: {'✅' if self.analytics.big_data_processing else '❌'}
+   • التوقعات: {'✅' if self.analytics.enable_predictions else '❌'}
+   • التوصيات: {'✅' if self.analytics.enable_recommendations else '❌'}
+
+🌐 الواجهات:
+   • الويب: {'✅' if self.interface.enable_web_interface else '❌'} (:{self.interface.web_port})
+   • API: {'✅' if self.interface.enable_api else '❌'}
+"""
+        return summary
     
-    def update_config(self, section: str, updates: Dict[str, Any]):
-        """تحديث قسم من التكوين"""
-        config_map = {
-            "ai_models": self.ai_models,
-            "database": self.database,
-            "security": self.security,
-            "interface": self.interface,
-            "learning": self.learning,
-            "performance": self.performance
-        }
-        
-        if section not in config_map:
-            raise ValueError(f"قسم غير معروف: {section}")
-        
-        config_obj = config_map[section]
-        
-        for key, value in updates.items():
-            if hasattr(config_obj, key):
-                setattr(config_obj, key, value)
-                self.logger.info(f"تم تحديث {section}.{key}")
-            else:
-                self.logger.warning(f"خاصية غير معروفة: {section}.{key}")
+    def reset_to_defaults(self):
+        """إعادة تعيين التكوين للإعدادات الافتراضية"""
+        self.__init__()
+        self.logger.info("تم إعادة تعيين التكوين للإعدادات الافتراضية")
 
-# مثيل عام لمدير التكوين
-config_manager = AdvancedConfigManager()
-
-def get_config_manager() -> AdvancedConfigManager:
-    """الحصول على مدير التكوين"""
-    return config_manager
-
-def get_config() -> AdvancedConfigManager:
-    """اختصار للحصول على التكوين"""
-    return config_manager
+# إنشاء مثيل عام للتكوين
+config = AdvancedConfig()

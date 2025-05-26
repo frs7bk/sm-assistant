@@ -1,230 +1,190 @@
+# ===================================
+# متطلبات المساعد الذكي الموحد المتقدم
+# ===================================
 
-# المتطلبات الأساسية للمساعد الذكي المتقدم
-python-dotenv>=1.0.0
-asyncio>=3.9.0
-asyncio-mqtt==0.11.0
-
-# نماذج الذكاء الاصطناعي المتقدمة
-openai>=1.12.0
-anthropic>=0.7.0
-google-generativeai>=0.3.0
-transformers>=4.36.0
+# الذكاء الاصطناعي والتعلم الآلي
+openai>=1.3.0
+transformers>=4.35.0
 torch>=2.1.0
-torchvision>=0.16.0
-torchaudio>=2.1.0
-accelerate>=0.25.0
-optimum>=1.16.0
-diffusers>=0.24.0
-xformers>=0.0.22
-
-# معالجة البيانات والتحليلات المتقدمة
-numpy>=1.25.0
-pandas>=2.1.0
-polars>=0.20.0
-pyarrow>=14.0.0
-dask[complete]>=2023.12.0
-ray[default]>=2.8.0
-vaex>=4.16.0
-
-# التعلم الآلي المتقدم
+tensorflow>=2.14.0
 scikit-learn>=1.3.0
-xgboost>=2.0.0
-lightgbm>=4.1.0
-catboost>=1.2.0
-optuna>=3.5.0
-hyperopt>=0.2.7
-mlflow>=2.9.0
-wandb>=0.16.0
+numpy>=1.24.0
+pandas>=2.1.0
+huggingface-hub>=0.17.0
 
-# معالجة اللغة الطبيعية المتقدمة
-spacy>=3.7.0
+# معالجة اللغة الطبيعية
 nltk>=3.8.1
-gensim>=4.3.0
-sentence-transformers>=2.2.0
-langchain>=0.1.0
-langsmith>=0.0.80
-llama-index>=0.9.0
-chromadb>=0.4.0
-pinecone-client>=3.0.0
-weaviate-client>=3.25.0
+spacy>=3.7.0
+textblob>=0.17.1
+googletrans>=4.0.0
+langdetect>=1.0.9
 
-# معالجة الصوت المتقدمة
-speech_recognition>=3.10.0
-pyttsx3>=2.90
-librosa>=0.10.0
-soundfile>=0.12.0
-whisper>=1.1.10
-faster-whisper>=0.10.0
-pyaudio>=0.2.11
-webrtcvad>=2.0.10
-noisereduce>=3.0.0
-
-# الرؤية الحاسوبية المتقدمة
+# الرؤية الحاسوبية
 opencv-python>=4.8.0
-opencv-contrib-python>=4.8.0
 Pillow>=10.0.0
-face_recognition>=1.3.0
+pytesseract>=0.3.10
+face-recognition>=1.3.0
 mediapipe>=0.10.0
-ultralytics>=8.0.0
-detectron2
-segment-anything
-insightface>=0.7.3
-facenet-pytorch>=2.5.3
-deepface>=0.0.81
 
-# الشبكات العصبية المتقدمة
-tensorflow>=2.15.0
-keras>=2.15.0
-pytorch-lightning>=2.1.0
-timm>=0.9.0
-huggingface_hub>=0.19.0
-accelerate>=0.25.0
+# الصوت والنطق
+pyttsx3>=2.90
+SpeechRecognition>=3.10.0
+pyaudio>=0.2.11
+librosa>=0.10.1
+sounddevice>=0.4.6
 
-# واجهات المستخدم المتقدمة
-streamlit>=1.29.0
-dash>=2.15.0
+# البيانات الضخمة والتحليلات
+dask[complete]>=2023.10.0
+pyspark>=3.5.0
 plotly>=5.17.0
-gradio>=4.10.0
-panel>=1.3.0
-nicegui>=1.4.0
-reflex>=0.3.0
-fastapi>=0.105.0
-uvicorn[standard]>=0.24.0
-websockets>=12.0
+dash>=2.14.0
+streamlit>=1.28.0
+seaborn>=0.12.0
+matplotlib>=3.7.0
 
-# تطوير الويب المتقدم
-fastapi>=0.105.0
-uvicorn[standard]>=0.24.0
-starlette>=0.27.0
-pydantic>=2.5.0
-sqlalchemy>=2.0.0
-alembic>=1.13.0
+# قواعد البيانات
+sqlite3
 redis>=5.0.0
-celery>=5.3.0
-
-# قواعد البيانات المتقدمة
+pymongo>=4.5.0
 sqlalchemy>=2.0.0
-asyncpg>=0.29.0
-psycopg2-binary>=2.9.0
-pymongo>=4.6.0
-motor>=3.3.0
-elasticsearch>=8.11.0
-qdrant-client>=1.7.0
+psycopg2-binary>=2.9.7
 
-# الأمان والتشفير المتقدم
-cryptography>=41.0.0
-pyjwt>=2.8.0
-passlib[bcrypt]>=1.7.4
-python-multipart>=0.0.6
-oauthlib>=3.2.2
-authlib>=1.3.0
-
-# مراقبة وتسجيل متقدم
-loguru>=0.7.0
-prometheus-client>=0.19.0
-structlog>=23.2.0
-rich>=13.7.0
-typer>=0.9.0
-
-# اختبار وجودة الكود
-pytest>=7.4.0
-pytest-asyncio>=0.21.0
-pytest-mock>=3.12.0
-coverage>=7.3.0
-black>=23.0.0
-isort>=5.13.0
-flake8>=6.0.0
-mypy>=1.7.0
-bandit>=1.7.5
-
-# أدوات الإنتاجية المتقدمة
-schedule>=1.2.0
-python-dateutil>=2.8.0
+# الويب والAPI
+fastapi>=0.104.0
+uvicorn>=0.24.0
+flask>=3.0.0
 requests>=2.31.0
 aiohttp>=3.9.0
-httpx>=0.25.0
-tenacity>=8.2.0
-backoff>=2.2.0
+websockets>=12.0
 
-# معالجة الملفات المتقدمة
-pdfplumber>=0.10.0
-python-docx>=1.1.0
-openpyxl>=3.1.0
-xlsxwriter>=3.1.0
-python-pptx>=0.6.23
+# المراقبة والسجلات
+loguru>=0.7.0
+prometheus-client>=0.18.0
+psutil>=5.9.0
 
-# الحوسبة العلمية
-scipy>=1.11.0
-sympy>=1.12.0
-matplotlib>=3.8.0
-seaborn>=0.13.0
-bokeh>=3.3.0
+# الأمان والتشفير
+cryptography>=41.0.0
+pyjwt>=2.8.0
+bcrypt>=4.0.1
+passlib>=1.7.4
+
+# إدارة التكوين
+python-dotenv>=1.0.0
+pyyaml>=6.0.1
+configparser>=6.0.0
 
 # أدوات التطوير
-jupyterlab>=4.0.0
-notebook>=7.0.0
-ipywidgets>=8.1.0
+pytest>=7.4.0
+black>=23.10.0
+flake8>=6.1.0
+mypy>=1.6.0
+pre-commit>=3.5.0
 
-# الشبكات والاتصالات
-paramiko>=3.4.0
-fabric>=3.2.0
-pexpect>=4.9.0
-
-# متنوعة متقدمة
+# واجهة المستخدم
 colorama>=0.4.6
+rich>=13.6.0
+click>=8.1.7
 tqdm>=4.66.0
-click>=8.1.0
-pyyaml>=6.0.1
-toml>=0.10.2
-jinja2>=3.1.0
-marshmallow>=3.20.0
-cerberus>=1.3.4
+inquirer>=3.1.3
 
-# الذكاء الاصطناعي المتخصص
-stable-baselines3>=2.2.0
-gym>=0.29.0
-gymnasium>=0.29.0
-ale-py>=0.8.1
-pybullet>=3.2.5
+# أدوات إضافية
+schedule>=1.2.0
+python-dateutil>=2.8.2
+pytz>=2023.3
+validators>=0.22.0
+python-magic>=0.4.27
 
-# معالجة الصور المتقدمة
-albumentations>=1.3.0
-imgaug>=0.4.0
-kornia>=0.7.0
+# تحسين الأداء
+numba>=0.58.0
+cython>=3.0.0
+ujson>=5.8.0
 
-# تحليل البيانات الزمنية
-prophet>=1.1.5
-statsmodels>=0.14.0
-arch>=6.2.0
+# التصور والرسوم البيانية
+bokeh>=3.3.0
+altair>=5.1.0
+pygraphviz>=1.11
 
-# API والتكامل
+# إدارة المهام
+celery>=5.3.0
+kombu>=5.3.0
+
+# الذكاء الاصطناعي المتقدم
+langchain>=0.0.330
+chromadb>=0.4.15
+pinecone-client>=2.2.4
+faiss-cpu>=1.7.4
+
+# أدوات إضافية للإنتاجية
+pyautogui>=0.9.54
+keyboard>=0.13.5
+mouse>=0.7.1
+pypdf2>=3.0.1
+python-docx>=0.8.11
+openpyxl>=3.1.2
+
+# شبكات التواصل الاجتماعي
 tweepy>=4.14.0
-slack-sdk>=3.26.0
-discord.py>=2.3.0
-
-# البحث والاسترجاع
-elasticsearch>=8.11.0
-opensearch-py>=2.4.0
+facebook-sdk>=3.1.0
 
 # الحوسبة السحابية
-boto3>=1.34.0
+boto3>=1.29.0
 google-cloud-storage>=2.10.0
 azure-storage-blob>=12.19.0
 
-# الأمان المتقدم
-python-jose[cryptography]>=3.3.0
-bcrypt>=4.1.0
+# إنترنت الأشياء
+paho-mqtt>=1.6.1
+bleak>=0.21.0
 
-# أدوات النشر والتطوير
+# تحويل التنسيقات
+markdown>=3.5.0
+html2text>=2020.1.16
+beautifulsoup4>=4.12.0
+
+# الاختبار والجودة
+coverage>=7.3.0
+pytest-cov>=4.1.0
+pytest-asyncio>=0.21.0
+bandit>=1.7.5
+
+# أدوات النشر
 gunicorn>=21.2.0
+docker>=6.1.0
 supervisor>=4.2.5
 
-# معالجة XML/HTML
-beautifulsoup4>=4.12.0
-lxml>=4.9.0
-selectolax>=0.3.0
+# تحسين البحث
+whoosh>=2.7.4
+elasticsearch>=8.10.0
 
-# التواصل مع APIs
-openapi-python-client>=0.15.0
-grpcio>=1.60.0
-protobuf>=4.25.0
+# الذكاء الاصطناعي التخصصي
+sentence-transformers>=2.2.2
+gensim>=4.3.2
+wordcloud>=1.9.2
+
+# أدوات التطوير المتقدمة
+ipython>=8.16.0
+jupyter>=1.0.0
+notebook>=7.0.0
+
+# المعالجة المتوازية
+joblib>=1.3.0
+multiprocess>=0.70.15
+concurrent-futures>=3.1.1
+
+# أدوات النظام
+watchdog>=3.0.0
+pathlib2>=2.3.7
+glob2>=0.7
+
+# التوثيق
+sphinx>=7.2.0
+sphinx-rtd-theme>=1.3.0
+mkdocs>=1.5.0
+
+# إدارة الإصدارات
+semantic-version>=2.10.0
+packaging>=23.2
+
+# أدوات إضافية للمطورين
+autopep8>=2.0.4
+isort>=5.12.0
+pylint>=3.0.0
