@@ -27,6 +27,10 @@ try:
     from core.unified_assistant_engine import UnifiedAssistantEngine
     from core.advanced_ai_engine import AdvancedAIEngine
     from core.module_manager import ModuleManager
+    from core.performance_optimizer import performance_optimizer
+    from core.reliability_engine import reliability_engine
+    from core.integration_hub import integration_hub
+    from interfaces.adaptive_ui_engine import adaptive_ui_engine
     from config.advanced_config import AdvancedConfig
     from analytics.big_data.dask_processor import DaskProcessor
     from analytics.prediction.dl_predictor import DeepLearningPredictor
@@ -57,6 +61,12 @@ class AdvancedUnifiedAssistant:
         self.dl_predictor: Optional[DeepLearningPredictor] = None
         self.active_learning: Optional[ActiveLearning] = None
         self.tts_engine: Optional[UltraNaturalTTS] = None
+        
+        # محركات التحسين الجديدة
+        self.performance_optimizer = performance_optimizer
+        self.reliability_engine = reliability_engine
+        self.integration_hub = integration_hub
+        self.adaptive_ui = adaptive_ui_engine
 
         # حالة النظام
         self.is_running = False
@@ -107,6 +117,26 @@ class AdvancedUnifiedAssistant:
             except Exception as e:
                 self.print_colored(f"⚠️ محرك الذكاء الاصطناعي غير متاح: {e}", Fore.YELLOW)
 
+
+    async def initialize_optimization_engines(self):
+        """تهيئة محركات التحسين والتطوير"""
+        try:
+            # تهيئة محرك الموثوقية
+            await self.reliability_engine.initialize()
+            self.print_colored("✅ محرك الموثوقية جاهز", Fore.GREEN)
+            
+            # تهيئة مركز التكامل
+            await self.integration_hub.initialize()
+            self.print_colored("✅ مركز التكامل جاهز", Fore.GREEN)
+            
+            # تهيئة المحرك التكيفي للواجهة
+            user_session = await self.adaptive_ui.initialize_user_session("default_user")
+            self.print_colored("✅ المحرك التكيفي للواجهة جاهز", Fore.GREEN)
+            
+        except Exception as e:
+            self.print_colored(f"⚠️ بعض محركات التحسين غير متاحة: {e}", Fore.YELLOW)
+
+
             # تهيئة محرك المساعد الموحد
             try:
                 self.assistant_engine = UnifiedAssistantEngine()
@@ -125,6 +155,9 @@ class AdvancedUnifiedAssistant:
 
             # تهيئة المكونات المتقدمة
             await self.initialize_advanced_components()
+            
+            # تهيئة محركات التحسين
+            await self.initialize_optimization_engines()
 
             self.print_colored("🎉 تم تهيئة جميع المحركات بنجاح!", Fore.GREEN)
 
@@ -222,6 +255,12 @@ class AdvancedUnifiedAssistant:
 
             if user_input.lower() in ['توقع', 'predict']:
                 return await self.make_predictions()
+            
+            if user_input.lower() in ['أداء', 'performance']:
+                return await self.get_performance_report()
+            
+            if user_input.lower() in ['بث', 'broadcast']:
+                return await self.broadcast_to_platforms("مرحباً من المساعد الذكي!")
 
             # معالجة ذكية للمدخل
             response = await self.intelligent_processing(user_input)
@@ -239,6 +278,7 @@ class AdvancedUnifiedAssistant:
             self.logger.error(f"خطأ في معالجة المدخل: {e}")
             return f"❌ عذراً، حدث خطأ: {str(e)}"
 
+    @performance_optimizer.cached(ttl=1800)  # كاش لمدة 30 دقيقة
     async def intelligent_processing(self, user_input: str) -> str:
         """معالجة ذكية متقدمة للمدخل"""
         try:
@@ -364,6 +404,71 @@ class AdvancedUnifiedAssistant:
         except Exception as e:
             self.logger.error(f"خطأ في توليد الصوت: {e}")
 
+    async def get_performance_report(self) -> str:
+        """تقرير الأداء الشامل"""
+        try:
+            # تقرير الأداء
+            perf_report = self.performance_optimizer.get_performance_report()
+            
+            # تقرير الموثوقية  
+            reliability_report = await self.reliability_engine.get_reliability_report()
+            
+            # حالة التكاملات
+            integrations_status = await self.integration_hub.get_integrations_status()
+            
+            report = f"""
+📊 تقرير الأداء الشامل
+{'='*50}
+
+🚀 الأداء:
+   • معدل إصابة الكاش: {perf_report['cache_performance']['hit_rate']}
+   • متوسط وقت الاستجابة: {perf_report['system_performance']['avg_response_time']}
+   • استخدام CPU: {perf_report['system_performance']['current_cpu_usage']}
+   • استخدام الذاكرة: {perf_report['system_performance']['current_memory_usage']}
+
+🛡️ الموثوقية:
+   • مستوى الصحة العام: {reliability_report['health_status']['overall_health']}
+   • نقاط الموثوقية: {reliability_report['reliability_score']}
+
+🌍 التكاملات:
+   • إجمالي التكاملات: {integrations_status['total_integrations']}
+   • التكاملات المفعلة: {integrations_status['enabled_integrations']}
+   • التكاملات الصحية: {integrations_status['healthy_integrations']}
+
+💡 التوصيات:
+"""
+            
+            # إضافة التوصيات
+            recommendations = perf_report.get('optimization_recommendations', [])
+            for rec in recommendations:
+                report += f"   • {rec}\n"
+            
+            return report
+            
+        except Exception as e:
+            return f"❌ خطأ في إنشاء تقرير الأداء: {e}"
+    
+    async def broadcast_to_platforms(self, message: str, platforms: Optional[List[str]] = None) -> str:
+        """بث رسالة لمنصات التواصل"""
+        try:
+            context = {
+                "user_id": "default_user",
+                "timestamp": datetime.now().isoformat(),
+                "source": "intelligent_assistant"
+            }
+            
+            result = await self.integration_hub.broadcast_message(message, context, platforms)
+            
+            if result['successful_sends'] > 0:
+                return f"✅ تم إرسال الرسالة إلى {result['successful_sends']} من {result['platforms_targeted']} منصة"
+            else:
+                return "⚠️ فشل إرسال الرسالة إلى جميع المنصات"
+                
+        except Exception as e:
+            return f"❌ خطأ في البث: {e}"
+
+
+
     def get_help_message(self) -> str:
         """رسالة المساعدة"""
         help_text = f"""
@@ -377,7 +482,9 @@ class AdvancedUnifiedAssistant:
 {Fore.YELLOW}🧠 الأوامر المتقدمة:
 {Fore.WHITE}  • تحليل / analyze - تحليل البيانات الضخمة
   • توقع / predict - عمل توقعات ذكية
-  • تعلم - تفعيل التعلم النشط
+  • أداء / performance - تقرير الأداء الشامل
+  • بث / broadcast - بث رسالة للمنصات
+  • تعلم - تفعيل التعلم النشط</old_str>
 
 {Fore.YELLOW}🔊 الميزات الصوتية:
 {Fore.WHITE}  • الرد الصوتي تلقائي (مُفعّل)
