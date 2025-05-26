@@ -5,7 +5,7 @@ channel = "stable-24_05"
 packages = ["espeak-ng", "glibcLocales", "libGL", "libGLU", "libsndfile", "libxcrypt", "pkg-config", "portaudio", "scrot", "tesseract", "xsimd", "xvfb-run"]
 
 [workflows]
-runButton = "تشغيل المساعد الموحد"
+runButton = "تشغيل المساعد التفاعلي"
 
 [[workflows.workflow]]
 name = "تشغيل المساعد الموحد"
@@ -33,3 +33,12 @@ mode = "sequential"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "python cleanup_duplicates.py"
+
+[[workflows.workflow]]
+name = "تشغيل المساعد التفاعلي"
+author = 43143009
+mode = "sequential"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python core/unified_assistant_engine.py"
