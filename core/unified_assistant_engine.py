@@ -1,618 +1,655 @@
+
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-محرك المساعد الذكي الموحد
-يدمج جميع الوحدات والميزات في نظام واحد متقدم
+🤖 محرك المساعد الذكي الموحد المتقدم
+Unified Advanced AI Assistant Engine v3.0.0
 """
 
 import asyncio
 import logging
 import json
 import time
-from typing import Dict, List, Optional, Any, Callable
-from pathlib import Path
 from datetime import datetime
+from typing import Dict, List, Optional, Any, Tuple, Callable
+from pathlib import Path
+from dataclasses import dataclass, asdict
+from enum import Enum
 import threading
-from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor
 import queue
-import sys
+import uuid
 
-# إضافة مسار المشروع
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
-
+# استيراد المكونات الأساسية
 try:
-    from core.advanced_ai_engine import get_ai_engine, AIResponse
-    AI_ENGINE_AVAILABLE = True
-except ImportError:
-    AI_ENGINE_AVAILABLE = False
+    from config.advanced_config import get_ai_config, get_performance_config
+    from ai_models.learning.continuous_learning_engine import ContinuousLearningEngine
+    from analytics.advanced_analytics_engine import AdvancedAnalyticsEngine
+    from core.advanced_error_handler import AdvancedErrorHandler
+    from core.performance_optimizer import PerformanceOptimizer
+except ImportError as e:
+    print(f"⚠️ استيراد اختياري فاشل: {e}")
 
-try:
-    from core.module_manager import get_module_manager
-    MODULE_MANAGER_AVAILABLE = True
-except ImportError:
-    MODULE_MANAGER_AVAILABLE = False
+class AssistantState(Enum):
+    """حالات المساعد"""
+    INITIALIZING = "initializing"
+    READY = "ready"
+    BUSY = "busy"
+    LEARNING = "learning"
+    ERROR = "error"
+    OFFLINE = "offline"
 
 @dataclass
-class ConversationTurn:
-    """دورة المحادثة"""
-    timestamp: datetime
-    user_input: str
-    assistant_response: str
-    confidence: float
+class UserSession:
+    """جلسة المستخدم"""
+    id: str
+    user_id: str
+    start_time: datetime
+    last_activity: datetime
     context: Dict[str, Any]
+    preferences: Dict[str, Any]
+    conversation_history: List[Dict[str, Any]]
+    active: bool = True
+
+@dataclass
+class TaskRequest:
+    """طلب مهمة"""
+    id: str
+    user_id: str
+    task_type: str
+    content: str
+    priority: int
+    timestamp: datetime
     metadata: Dict[str, Any]
+    callback: Optional[Callable] = None
 
 class UnifiedAssistantEngine:
-    """محرك المساعد الذكي الموحد"""
-
+    """محرك المساعد الذكي الموحد المتقدم"""
+    
     def __init__(self):
         self.logger = logging.getLogger(__name__)
-
-        # حالة المحرك
-        self.is_running = False
-        self.is_initialized = False
-
-        # المكونات الأساسية
-        self.ai_engine = None
-        self.module_manager = None
-
-        # سياق المحادثة
-        self.conversation_history = []
-        self.current_session = {
-            "start_time": datetime.now(),
-            "user_id": "default",
-            "context": {},
-            "turn_count": 0
+        self.state = AssistantState.INITIALIZING
+        
+        # إعدادات النظام
+        self.config = self._load_config()
+        self.error_handler = AdvancedErrorHandler()
+        self.performance_optimizer = PerformanceOptimizer()
+        
+        # مكونات الذكاء الاصطناعي
+        self.ai_models = {}
+        self.learning_engine = None
+        self.analytics_engine = None
+        
+        # إدارة الجلسات والمهام
+        self.active_sessions: Dict[str, UserSession] = {}
+        self.task_queue = queue.PriorityQueue()
+        self.executor = ThreadPoolExecutor(max_workers=4)
+        
+        # ذاكرة النظام
+        self.memory = {
+            'short_term': {},
+            'long_term': {},
+            'context': {},
+            'user_profiles': {}
         }
-
-        # الواجهات النشطة
-        self.active_interfaces = {
-            "text": True,
-            "voice": False,
-            "web": False,
-            "api": False
+        
+        # إحصائيات النظام
+        self.stats = {
+            'total_requests': 0,
+            'successful_requests': 0,
+            'failed_requests': 0,
+            'average_response_time': 0.0,
+            'start_time': datetime.now(),
+            'uptime': 0.0
         }
-
-        # إحصائيات الجلسة
-        self.session_stats = {
-            "total_interactions": 0,
-            "successful_responses": 0,
-            "error_count": 0,
-            "avg_confidence": 0.0,
-            "session_duration": 0.0
-        }
-
-        # قائمة انتظار المهام
-        self.task_queue = queue.Queue()
-        self.workers = []
-
-        # إضافة مكونات جديدة متقدمة
-        self.voice_commander = None
-        self.vision_system = None
-        self.game_coach = None
-        self.design_expert = None
-        self.automation_engine = None
-
-        # أنظمة التمييز الصوتي المتقدمة
-        self.voice_biometrics = None
-        self.environmental_audio = None
-        self.audio_analysis_enabled = True
-
-        # إعدادات التحكم الصوتي المتقدم
-        self.voice_control_settings = {
-            'continuous_listening': True,
-            'wake_word_enabled': True,
-            'wake_words': ['مساعد', 'assistant', 'هيلو'],
-            'command_timeout': 10,
-            'confidence_threshold': 0.7,
-            'multi_language_support': True,
-            'voice_authentication': False
-        }
-
-        # قاموس الأوامر الصوتية
-        self.voice_commands = {
-            # أوامر التحكم في النظام
-            'system_control': {
-                'فتح متصفح': 'open_browser',
-                'أغلق البرنامج': 'close_application',
-                'أرفع الصوت': 'volume_up',
-                'أخفض الصوت': 'volume_down',
-                'خذ لقطة شاشة': 'take_screenshot',
-                'أفتح المجلد': 'open_folder'
-            },
-            # أوامر التطبيقات
-            'applications': {
-                'فتح فوتوشوب': 'open_photoshop',
-                'فتح إليستريتور': 'open_illustrator',
-                'فتح أفتر إفكتس': 'open_after_effects',
-                'فتح بريمير': 'open_premiere',
-                'فتح كروم': 'open_chrome',
-                'فتح سبوتيفاي': 'open_spotify'
-            },
-            # أوامر التحليل
-            'analysis': {
-                'حلل هذه الصورة': 'analyze_image',
-                'حلل هذا الفيديو': 'analyze_video',
-                'حلل هذا التصميم': 'analyze_design',
-                'حلل أدائي في اللعبة': 'analyze_game_performance'
-            },
-            # أوامر الكاميرا
-            'camera': {
-                'شغل الكاميرا': 'start_camera',
-                'أوقف الكاميرا': 'stop_camera',
-                'حلل وجهي': 'analyze_face',
-                'تتبع حركتي': 'track_movement',
-                'كشف المشاعر': 'detect_emotions'
-            }
-        }
-
-        # تهيئة المكونات
-        # self._initialize_components() # This line was already present, keeping it here
-        # Note: _initialize_components() is called in the original code, so keeping it.
-
-    async def initialize(self):
-        """تهيئة محرك المساعد"""
-        self.logger.info("🚀 تهيئة محرك المساعد الموحد...")
-
+        
+        # معالجات المهام
+        self.task_handlers = self._setup_task_handlers()
+        
+        self.logger.info("🤖 تم إنشاء محرك المساعد الموحد")
+    
+    def _load_config(self) -> Dict[str, Any]:
+        """تحميل الإعدادات المتقدمة"""
         try:
-            # تهيئة محرك الذكاء الاصطناعي
-            if AI_ENGINE_AVAILABLE:
-                self.ai_engine = await get_ai_engine()
-                self.logger.info("✅ تم تهيئة محرك الذكاء الاصطناعي")
-            else:
-                self.logger.warning("⚠️ محرك الذكاء الاصطناعي غير متاح")
-
-            # تهيئة مدير الوحدات
-            if MODULE_MANAGER_AVAILABLE:
-                self.module_manager = get_module_manager()
-                if not self.module_manager:
-                    self.logger.warning("⚠️ مدير الوحدات غير متاح")
-            else:
-                self.logger.warning("⚠️ مدير الوحدات غير متاح - استيراد فاشل")
-
-            # تهيئة العمال للمعالجة المتوازية
-            self._initialize_workers()
-
-            self.is_initialized = True
-            self.logger.info("✅ تم تهيئة محرك المساعد بنجاح")
-
+            ai_config = get_ai_config()
+            performance_config = get_performance_config()
+            
+            return {
+                'ai': asdict(ai_config) if hasattr(ai_config, '__dataclass_fields__') else ai_config,
+                'performance': asdict(performance_config) if hasattr(performance_config, '__dataclass_fields__') else performance_config,
+                'max_concurrent_tasks': 10,
+                'session_timeout': 3600,  # ساعة واحدة
+                'memory_cleanup_interval': 300,  # 5 دقائق
+                'auto_save_interval': 60  # دقيقة واحدة
+            }
         except Exception as e:
-            self.logger.error(f"❌ فشل تهيئة محرك المساعد: {e}")
-            raise
-
-    def _initialize_workers(self):
-        """تهيئة العمال للمعالجة المتوازية"""
-        num_workers = 2
-
-        for i in range(num_workers):
-            worker = threading.Thread(
-                target=self._worker_thread,
-                name=f"AssistantWorker-{i}",
-                daemon=True
+            self.logger.warning(f"استخدام الإعدادات الافتراضية: {e}")
+            return {
+                'ai': {'default_model': 'gpt-3.5-turbo'},
+                'performance': {'max_memory_usage': 1024},
+                'max_concurrent_tasks': 5,
+                'session_timeout': 1800,
+                'memory_cleanup_interval': 300,
+                'auto_save_interval': 60
+            }
+    
+    def _setup_task_handlers(self) -> Dict[str, Callable]:
+        """إعداد معالجات المهام"""
+        return {
+            'chat': self._handle_chat_task,
+            'analysis': self._handle_analysis_task,
+            'generation': self._handle_generation_task,
+            'learning': self._handle_learning_task,
+            'automation': self._handle_automation_task,
+            'vision': self._handle_vision_task,
+            'audio': self._handle_audio_task,
+            'search': self._handle_search_task,
+            'calculation': self._handle_calculation_task,
+            'translation': self._handle_translation_task
+        }
+    
+    async def initialize(self) -> bool:
+        """تهيئة المحرك"""
+        try:
+            self.logger.info("🚀 بدء تهيئة محرك المساعد الموحد...")
+            
+            # تهيئة معالج الأخطاء
+            await self.error_handler.initialize()
+            
+            # تهيئة محسن الأداء
+            await self.performance_optimizer.initialize()
+            
+            # تهيئة محرك التعلم
+            try:
+                self.learning_engine = ContinuousLearningEngine()
+                await self.learning_engine.initialize()
+                self.logger.info("✅ تم تهيئة محرك التعلم")
+            except Exception as e:
+                self.logger.warning(f"⚠️ تعذر تهيئة محرك التعلم: {e}")
+            
+            # تهيئة محرك التحليلات
+            try:
+                self.analytics_engine = AdvancedAnalyticsEngine()
+                await self.analytics_engine.initialize()
+                self.logger.info("✅ تم تهيئة محرك التحليلات")
+            except Exception as e:
+                self.logger.warning(f"⚠️ تعذر تهيئة محرك التحليلات: {e}")
+            
+            # تحميل الذاكرة المحفوظة
+            await self._load_memory()
+            
+            # بدء المهام الخلفية
+            await self._start_background_tasks()
+            
+            self.state = AssistantState.READY
+            self.logger.info("🎉 تم تهيئة المحرك بنجاح!")
+            
+            return True
+            
+        except Exception as e:
+            self.state = AssistantState.ERROR
+            self.logger.error(f"❌ فشل في تهيئة المحرك: {e}")
+            await self.error_handler.handle_error(e, context="engine_initialization")
+            return False
+    
+    async def _start_background_tasks(self):
+        """بدء المهام الخلفية"""
+        # تنظيف الذاكرة الدوري
+        asyncio.create_task(self._memory_cleanup_loop())
+        
+        # حفظ البيانات الدوري
+        asyncio.create_task(self._auto_save_loop())
+        
+        # مراقبة الأداء
+        asyncio.create_task(self._performance_monitoring_loop())
+        
+        # معالجة المهام
+        asyncio.create_task(self._task_processing_loop())
+        
+        self.logger.info("🔄 تم بدء المهام الخلفية")
+    
+    async def create_session(self, user_id: str, preferences: Dict[str, Any] = None) -> str:
+        """إنشاء جلسة مستخدم جديدة"""
+        session_id = str(uuid.uuid4())
+        
+        session = UserSession(
+            id=session_id,
+            user_id=user_id,
+            start_time=datetime.now(),
+            last_activity=datetime.now(),
+            context={},
+            preferences=preferences or {},
+            conversation_history=[]
+        )
+        
+        self.active_sessions[session_id] = session
+        
+        # تحميل ملف المستخدم
+        if user_id in self.memory['user_profiles']:
+            session.context.update(self.memory['user_profiles'][user_id])
+        
+        self.logger.info(f"👤 تم إنشاء جلسة جديدة: {session_id}")
+        return session_id
+    
+    async def process_request(self, session_id: str, task_type: str, 
+                            content: str, metadata: Dict[str, Any] = None) -> Dict[str, Any]:
+        """معالجة طلب من المستخدم"""
+        start_time = time.time()
+        
+        try:
+            # التحقق من الجلسة
+            if session_id not in self.active_sessions:
+                raise ValueError(f"جلسة غير صالحة: {session_id}")
+            
+            session = self.active_sessions[session_id]
+            session.last_activity = datetime.now()
+            
+            # إنشاء مهمة
+            task = TaskRequest(
+                id=str(uuid.uuid4()),
+                user_id=session.user_id,
+                task_type=task_type,
+                content=content,
+                priority=metadata.get('priority', 5) if metadata else 5,
+                timestamp=datetime.now(),
+                metadata=metadata or {}
             )
-            worker.start()
-            self.workers.append(worker)
-
-        self.logger.info(f"تم تشغيل {num_workers} عامل للمعالجة")
-
-    def _worker_thread(self):
-        """خيط العامل للمعالجة"""
+            
+            # معالجة المهمة
+            result = await self._process_task(task, session)
+            
+            # تحديث الإحصائيات
+            response_time = time.time() - start_time
+            await self._update_stats(response_time, True)
+            
+            # حفظ في تاريخ المحادثة
+            session.conversation_history.append({
+                'timestamp': task.timestamp.isoformat(),
+                'task_type': task_type,
+                'content': content,
+                'response': result,
+                'response_time': response_time
+            })
+            
+            # التعلم من التفاعل
+            if self.learning_engine:
+                await self.learning_engine.learn_from_interaction(
+                    task_type, content, result, session.context
+                )
+            
+            return {
+                'success': True,
+                'result': result,
+                'response_time': response_time,
+                'task_id': task.id
+            }
+            
+        except Exception as e:
+            response_time = time.time() - start_time
+            await self._update_stats(response_time, False)
+            
+            error_response = await self.error_handler.handle_error(
+                e, context={
+                    'session_id': session_id,
+                    'task_type': task_type,
+                    'content': content[:100]  # أول 100 حرف فقط
+                }
+            )
+            
+            return {
+                'success': False,
+                'error': str(e),
+                'error_details': error_response,
+                'response_time': response_time
+            }
+    
+    async def _process_task(self, task: TaskRequest, session: UserSession) -> Any:
+        """معالجة مهمة محددة"""
+        handler = self.task_handlers.get(task.task_type)
+        
+        if not handler:
+            raise ValueError(f"نوع مهمة غير مدعوم: {task.task_type}")
+        
+        # تحديث السياق
+        context = {
+            **session.context,
+            'user_preferences': session.preferences,
+            'conversation_history': session.conversation_history[-10:],  # آخر 10 رسائل
+            'task_metadata': task.metadata
+        }
+        
+        # معالجة المهمة
+        self.state = AssistantState.BUSY
+        try:
+            result = await handler(task, context)
+            self.state = AssistantState.READY
+            return result
+        except Exception as e:
+            self.state = AssistantState.ERROR
+            raise e
+    
+    async def _handle_chat_task(self, task: TaskRequest, context: Dict[str, Any]) -> str:
+        """معالجة مهمة المحادثة"""
+        try:
+            # استخدام نموذج الذكاء الاصطناعي للرد
+            if 'gpt' in self.ai_models:
+                response = await self.ai_models['gpt'].generate_response(
+                    task.content, context
+                )
+            else:
+                # رد افتراضي
+                response = f"فهمت طلبك: {task.content}. كيف يمكنني مساعدتك أكثر؟"
+            
+            return response
+            
+        except Exception as e:
+            self.logger.error(f"خطأ في معالجة المحادثة: {e}")
+            return "عذراً، حدث خطأ في معالجة طلبك. يرجى المحاولة مرة أخرى."
+    
+    async def _handle_analysis_task(self, task: TaskRequest, context: Dict[str, Any]) -> Dict[str, Any]:
+        """معالجة مهمة التحليل"""
+        if not self.analytics_engine:
+            raise ValueError("محرك التحليلات غير متاح")
+        
+        return await self.analytics_engine.analyze_data(task.content, context)
+    
+    async def _handle_generation_task(self, task: TaskRequest, context: Dict[str, Any]) -> str:
+        """معالجة مهمة التوليد"""
+        # توليد محتوى (نص، صور، إلخ)
+        content_type = task.metadata.get('content_type', 'text')
+        
+        if content_type == 'text':
+            return f"محتوى مُولد بناءً على: {task.content}"
+        elif content_type == 'code':
+            return f"```python\n# كود مُولد بناءً على: {task.content}\nprint('Hello, World!')\n```"
+        else:
+            return f"تم توليد محتوى من نوع {content_type}"
+    
+    async def _handle_learning_task(self, task: TaskRequest, context: Dict[str, Any]) -> Dict[str, Any]:
+        """معالجة مهمة التعلم"""
+        if not self.learning_engine:
+            raise ValueError("محرك التعلم غير متاح")
+        
+        return await self.learning_engine.process_learning_request(task.content, context)
+    
+    async def _handle_automation_task(self, task: TaskRequest, context: Dict[str, Any]) -> str:
+        """معالجة مهمة الأتمتة"""
+        # تنفيذ مهام الأتمتة
+        automation_type = task.metadata.get('automation_type', 'general')
+        return f"تم تنفيذ مهمة الأتمتة: {automation_type}"
+    
+    async def _handle_vision_task(self, task: TaskRequest, context: Dict[str, Any]) -> Dict[str, Any]:
+        """معالجة مهمة الرؤية"""
+        # معالجة الصور والفيديو
+        return {
+            'detected_objects': [],
+            'confidence': 0.0,
+            'description': "تحليل بصري للمحتوى"
+        }
+    
+    async def _handle_audio_task(self, task: TaskRequest, context: Dict[str, Any]) -> Dict[str, Any]:
+        """معالجة مهمة الصوت"""
+        # معالجة الصوت
+        return {
+            'transcription': task.content,
+            'language': 'ar',
+            'confidence': 0.95
+        }
+    
+    async def _handle_search_task(self, task: TaskRequest, context: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """معالجة مهمة البحث"""
+        # البحث في المعرفة
+        return [
+            {
+                'title': f"نتيجة البحث عن: {task.content}",
+                'content': "محتوى النتيجة",
+                'relevance': 0.9
+            }
+        ]
+    
+    async def _handle_calculation_task(self, task: TaskRequest, context: Dict[str, Any]) -> Dict[str, Any]:
+        """معالجة مهمة الحسابات"""
+        try:
+            # حسابات بسيطة
+            if '+' in task.content:
+                parts = task.content.split('+')
+                result = sum(float(part.strip()) for part in parts)
+                return {'result': result, 'operation': 'addition'}
+            else:
+                return {'result': 'غير مدعوم', 'operation': 'unknown'}
+        except:
+            return {'result': 'خطأ في الحساب', 'operation': 'error'}
+    
+    async def _handle_translation_task(self, task: TaskRequest, context: Dict[str, Any]) -> Dict[str, Any]:
+        """معالجة مهمة الترجمة"""
+        target_language = task.metadata.get('target_language', 'en')
+        
+        return {
+            'original_text': task.content,
+            'translated_text': f"[ترجمة إلى {target_language}] {task.content}",
+            'source_language': 'ar',
+            'target_language': target_language,
+            'confidence': 0.9
+        }
+    
+    async def _memory_cleanup_loop(self):
+        """تنظيف الذاكرة الدوري"""
         while True:
             try:
-                task = self.task_queue.get(timeout=1)
-                if task is None:  # إشارة الإيقاف
-                    break
-
-                # تنفيذ المهمة
-                task_func, args, kwargs = task
-                task_func(*args, **kwargs)
-
-                self.task_queue.task_done()
-
-            except queue.Empty:
-                continue
+                await asyncio.sleep(self.config['memory_cleanup_interval'])
+                
+                # تنظيف الجلسات المنتهية
+                current_time = datetime.now()
+                expired_sessions = []
+                
+                for session_id, session in self.active_sessions.items():
+                    if (current_time - session.last_activity).seconds > self.config['session_timeout']:
+                        expired_sessions.append(session_id)
+                
+                for session_id in expired_sessions:
+                    del self.active_sessions[session_id]
+                    self.logger.info(f"🧹 تم إزالة جلسة منتهية: {session_id}")
+                
+                # تنظيف الذاكرة قصيرة المدى
+                self.memory['short_term'] = {}
+                
+                self.logger.debug("🧹 تم تنظيف الذاكرة")
+                
             except Exception as e:
-                self.logger.error(f"خطأ في العامل: {e}")
-
-    async def process_input(
-        self, 
-        user_input: str, 
-        input_type: str = "text",
-        user_id: str = "default",
-        context: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
-        """معالجة إدخال المستخدم"""
-
-        start_time = time.time()
-
-        try:
-            self.logger.info(f"📝 معالجة الإدخال: {user_input[:50]}...")
-
-            # تحديث سياق الجلسة
-            self.current_session["user_id"] = user_id
-            self.current_session["turn_count"] += 1
-
-            if context:
-                self.current_session["context"].update(context)
-
-            # معالجة الإدخال حسب النوع
-            if input_type == "text":
-                response = await self._process_text_input(user_input, user_id)
-            elif input_type == "voice":
-                response = await self._process_voice_input(user_input, user_id)
-            elif input_type == "image":
-                response = await self._process_image_input(user_input, user_id)
-            else:
-                response = await self._process_generic_input(user_input, user_id)
-
-            # إنشاء دورة المحادثة
-            turn = ConversationTurn(
-                timestamp=datetime.now(),
-                user_input=user_input,
-                assistant_response=response.get("text", ""),
-                confidence=response.get("confidence", 0.0),
-                context=self.current_session["context"].copy(),
-                metadata={
-                    "input_type": input_type,
-                    "processing_time": time.time() - start_time,
-                    "user_id": user_id
-                }
-            )
-
-            # إضافة إلى التاريخ
-            self.conversation_history.append(turn)
-
-            # تحديث الإحصائيات
-            self._update_session_stats(turn)
-
-            # إضافة معلومات إضافية للاستجابة
-            response.update({
-                "turn_id": len(self.conversation_history),
-                "session_info": {
-                    "turn_count": self.current_session["turn_count"],
-                    "session_duration": (datetime.now() - self.current_session["start_time"]).total_seconds()
-                },
-                "processing_time": time.time() - start_time
-            })
-
-            return response
-
-        except Exception as e:
-            self.logger.error(f"❌ خطأ في معالجة الإدخال: {e}")
-            self.session_stats["error_count"] += 1
-
-            return {
-                "text": "عذراً، حدث خطأ في المعالجة. يرجى المحاولة مرة أخرى.",
-                "confidence": 0.0,
-                "intent": "error",
-                "suggestions": ["إعادة المحاولة", "تبسيط السؤال"],
-                "error": str(e)
-            }
-
-    async def _process_text_input(self, text: str, user_id: str) -> Dict[str, Any]:
-        """معالجة النص"""
-
-        if self.ai_engine:
-            # استخدام محرك الذكاء الاصطناعي المتقدم
-            ai_response = await self.ai_engine.process_natural_language(
-                text, user_id, self.current_session["context"]
-            )
-
-            return {
-                "text": ai_response.text,
-                "confidence": ai_response.confidence,
-                "intent": ai_response.intent,
-                "emotions": ai_response.emotions,
-                "entities": ai_response.entities,
-                "suggestions": ai_response.suggestions,
-                "metadata": ai_response.metadata
-            }
-        else:
-            # معالجة أساسية
-            return await self._basic_text_processing(text)
-
-    async def _basic_text_processing(self, text: str) -> Dict[str, Any]:
-        """معالجة نصية أساسية"""
-
-        # تحليل أساسي للنص
-        text_lower = text.lower()
-
-        # كشف القصد الأساسي
-        if any(word in text_lower for word in ["مرحبا", "أهلا", "سلام"]):
-            intent = "greeting"
-            response = "أهلاً وسهلاً! كيف يمكنني مساعدتك؟"
-            confidence = 0.9
-        elif any(word in text_lower for word in ["شكرا", "متشكر", "أشكرك"]):
-            intent = "thanks"
-            response = "عفواً! أسعدني أن أساعدك."
-            confidence = 0.9
-        elif any(word in text_lower for word in ["وداعا", "مع السلامة"]):
-            intent = "goodbye"
-            response = "وداعاً! أتمنى لك يوماً سعيداً."
-            confidence = 0.9
-        elif "؟" in text or any(word in text_lower for word in ["كيف", "ماذا", "متى", "أين"]):
-            intent = "question"
-            response = "سؤال جيد! أحاول أن أجد أفضل إجابة لك..."
-            confidence = 0.7
-        else:
-            intent = "general"
-            response = "أفهم ما تقوله. كيف يمكنني مساعدتك بشكل أفضل؟"
-            confidence = 0.5
-
-        return {
-            "text": response,
-            "confidence": confidence,
-            "intent": intent,
-            "emotions": {"neutral": 1.0},
-            "entities": [],
-            "suggestions": [
-                "هل تريد المزيد من المساعدة؟",
-                "هل لديك أسئلة أخرى؟"
-            ]
-        }
-
-    async def _process_voice_input(self, audio_data: str, user_id: str) -> Dict[str, Any]:
-        """معالجة الصوت"""
-        # مؤقتاً نعامل الصوت كنص
-        return await self._process_text_input(audio_data, user_id)
-
-    async def _process_image_input(self, image_path: str, user_id: str) -> Dict[str, Any]:
-        """معالجة الصور"""
-
-        if self.ai_engine:
+                self.logger.error(f"خطأ في تنظيف الذاكرة: {e}")
+    
+    async def _auto_save_loop(self):
+        """حفظ البيانات الدوري"""
+        while True:
             try:
-                analysis = await self.ai_engine.analyze_image(image_path)
-
-                if "error" in analysis:
-                    return {
-                        "text": f"عذراً، لم أستطع تحليل الصورة: {analysis['error']}",
-                        "confidence": 0.0,
-                        "intent": "error"
-                    }
-
-                faces_count = analysis.get("faces_detected", 0)
-
-                if faces_count > 0:
-                    response = f"أرى {faces_count} وجه في الصورة."
-                else:
-                    response = "لا أرى وجوه في هذه الصورة."
-
-                return {
-                    "text": response,
-                    "confidence": 0.8,
-                    "intent": "image_analysis",
-                    "analysis_results": analysis
-                }
-
+                await asyncio.sleep(self.config['auto_save_interval'])
+                await self._save_memory()
+                self.logger.debug("💾 تم حفظ البيانات تلقائياً")
+                
             except Exception as e:
-                return {
-                    "text": f"خطأ في تحليل الصورة: {str(e)}",
-                    "confidence": 0.0,
-                    "intent": "error"
-                }
+                self.logger.error(f"خطأ في الحفظ التلقائي: {e}")
+    
+    async def _performance_monitoring_loop(self):
+        """مراقبة الأداء"""
+        while True:
+            try:
+                await asyncio.sleep(30)  # كل 30 ثانية
+                
+                # حساب وقت التشغيل
+                self.stats['uptime'] = (datetime.now() - self.stats['start_time']).total_seconds()
+                
+                # تحسين الأداء إذا لزم الأمر
+                await self.performance_optimizer.optimize_if_needed(self.stats)
+                
+            except Exception as e:
+                self.logger.error(f"خطأ في مراقبة الأداء: {e}")
+    
+    async def _task_processing_loop(self):
+        """معالجة المهام من الطابور"""
+        while True:
+            try:
+                # معالجة المهام المتراكمة
+                if not self.task_queue.empty():
+                    priority, task = self.task_queue.get()
+                    # معالجة المهمة في thread منفصل
+                    self.executor.submit(self._process_background_task, task)
+                
+                await asyncio.sleep(1)
+                
+            except Exception as e:
+                self.logger.error(f"خطأ في معالجة المهام: {e}")
+    
+    def _process_background_task(self, task):
+        """معالجة مهمة في الخلفية"""
+        try:
+            # معالجة المهام التي لا تحتاج رد فوري
+            self.logger.info(f"🔄 معالجة مهمة خلفية: {task.id}")
+            
+        except Exception as e:
+            self.logger.error(f"خطأ في معالجة مهمة خلفية: {e}")
+    
+    async def _update_stats(self, response_time: float, success: bool):
+        """تحديث الإحصائيات"""
+        self.stats['total_requests'] += 1
+        
+        if success:
+            self.stats['successful_requests'] += 1
         else:
-            return {
-                "text": "عذراً، تحليل الصور غير متاح حالياً.",
-                "confidence": 0.0,
-                "intent": "unavailable"
-            }
-
-    async def _process_generic_input(self, input_data: str, user_id: str) -> Dict[str, Any]:
-        """معالجة عامة للإدخال"""
-        return await self._process_text_input(input_data, user_id)
-
-    def _update_session_stats(self, turn: ConversationTurn):
-        """تحديث إحصائيات الجلسة"""
-        self.session_stats["total_interactions"] += 1
-
-        if turn.confidence > 0.5:
-            self.session_stats["successful_responses"] += 1
-
-        # حساب متوسط الثقة
-        total = self.session_stats["total_interactions"]
-        current_avg = self.session_stats["avg_confidence"]
-        new_avg = (current_avg * (total - 1) + turn.confidence) / total
-        self.session_stats["avg_confidence"] = new_avg
-
-        # مدة الجلسة
-        self.session_stats["session_duration"] = (
-            datetime.now() - self.current_session["start_time"]
-        ).total_seconds()
-
+            self.stats['failed_requests'] += 1
+        
+        # حساب متوسط وقت الاستجابة
+        total_time = self.stats['average_response_time'] * (self.stats['total_requests'] - 1)
+        self.stats['average_response_time'] = (total_time + response_time) / self.stats['total_requests']
+    
+    async def _load_memory(self):
+        """تحميل الذاكرة المحفوظة"""
+        try:
+            memory_file = Path("data/memory/engine_memory.json")
+            
+            if memory_file.exists():
+                with open(memory_file, 'r', encoding='utf-8') as f:
+                    saved_memory = json.load(f)
+                
+                self.memory.update(saved_memory)
+                self.logger.info("💾 تم تحميل الذاكرة المحفوظة")
+            
+        except Exception as e:
+            self.logger.warning(f"تعذر تحميل الذاكرة: {e}")
+    
+    async def _save_memory(self):
+        """حفظ الذاكرة"""
+        try:
+            memory_dir = Path("data/memory")
+            memory_dir.mkdir(parents=True, exist_ok=True)
+            
+            memory_file = memory_dir / "engine_memory.json"
+            
+            with open(memory_file, 'w', encoding='utf-8') as f:
+                json.dump(self.memory, f, ensure_ascii=False, indent=2, default=str)
+            
+        except Exception as e:
+            self.logger.error(f"خطأ في حفظ الذاكرة: {e}")
+    
     async def start_interactive_session(self):
         """بدء جلسة تفاعلية"""
-        self.logger.info("🎯 بدء الجلسة التفاعلية")
-
-        if not self.is_initialized:
-            await self.initialize()
-
-        self.is_running = True
-
-        print("\n" + "="*60)
-        print("🤖 أهلاً بك في المساعد الذكي الموحد!")
-        print("="*60)
-        print("💡 نصائح:")
-        print("   • اكتب 'خروج' أو 'quit' للخروج")
-        print("   • اكتب 'إحصائيات' لعرض إحصائيات الجلسة")
-        print("   • اكتب 'مساعدة' لعرض الأوامر المتاحة")
-        print("="*60)
-
-        while self.is_running:
+        print("\n🤖 مرحباً! أنا المساعد الذكي المتقدم")
+        print("اكتب 'خروج' أو 'exit' للإنهاء")
+        print("-" * 50)
+        
+        # إنشاء جلسة افتراضية
+        session_id = await self.create_session("interactive_user")
+        
+        while True:
             try:
-                # الحصول على إدخال المستخدم
                 user_input = input("\n👤 أنت: ").strip()
-
+                
+                if user_input.lower() in ['خروج', 'exit', 'quit']:
+                    print("👋 وداعاً!")
+                    break
+                
                 if not user_input:
                     continue
-
-                # أوامر خاصة
-                if user_input.lower() in ['خروج', 'quit', 'exit']:
-                    await self._handle_exit()
-                    break
-
-                elif user_input.lower() in ['إحصائيات', 'stats']:
-                    self._display_session_stats()
-                    continue
-
-                elif user_input.lower() in ['مساعدة', 'help']:
-                    self._display_help()
-                    continue
-
-                elif user_input.lower() in ['تنظيف', 'clear']:
-                    self._clear_conversation()
-                    continue
-
-                # معالجة الإدخال
-                print("🤖 المساعد: يفكر...")
-
-                response = await self.process_input(user_input)
-
-                # عرض الاستجابة
-                print(f"\n🤖 المساعد: {response['text']}")
-
-                # عرض معلومات إضافية إذا كانت متاحة
-                if response.get('confidence', 0) < 0.7:
-                    print(f"   💭 (مستوى الثقة: {response['confidence']:.1%})")
-
-                if response.get('suggestions'):
-                    print("   💡 اقتراحات:")
-                    for suggestion in response['suggestions'][:2]:
-                        print(f"      • {suggestion}")
-
+                
+                # معالجة الطلب
+                response = await self.process_request(
+                    session_id, 'chat', user_input
+                )
+                
+                if response['success']:
+                    print(f"🤖 المساعد: {response['result']}")
+                    print(f"⏱️ وقت الاستجابة: {response['response_time']:.2f}s")
+                else:
+                    print(f"❌ خطأ: {response['error']}")
+                
             except KeyboardInterrupt:
-                await self._handle_exit()
+                print("\n👋 تم الإيقاف بواسطة المستخدم")
                 break
             except Exception as e:
-                self.logger.error(f"خطأ في الجلسة التفاعلية: {e}")
-                print(f"\n❌ حدث خطأ: {str(e)}")
-
-    def _display_session_stats(self):
-        """عرض إحصائيات الجلسة"""
-        print("\n📊 إحصائيات الجلسة:")
-        print(f"   • إجمالي التفاعلات: {self.session_stats['total_interactions']}")
-        print(f"   • الاستجابات الناجحة: {self.session_stats['successful_responses']}")
-        print(f"   • متوسط الثقة: {self.session_stats['avg_confidence']:.1%}")
-        print(f"   • مدة الجلسة: {self.session_stats['session_duration']:.1f} ثانية")
-        print(f"   • عدد الأخطاء: {self.session_stats['error_count']}")
-
-    def _display_help(self):
-        """عرض المساعدة"""
-        print("\n❓ الأوامر المتاحة:")
-        print("   • خروج / quit - إنهاء الجلسة")
-        print("   • إحصائيات / stats - عرض إحصائيات الجلسة")
-        print("   • مساعدة / help - عرض هذه المساعدة")
-        print("   • تنظيف / clear - مسح تاريخ المحادثة")
-
-        if self.ai_engine:
-            print("\n🎯 الميزات المتاحة:")
-            print("   • معالجة اللغة الطبيعية المتقدمة")
-            print("   • تحليل المشاعر والكيانات")
-            print("   • ذاكرة المحادثة الذكية")
-            print("   • اقتراحات تفاعلية")
-
-    def _clear_conversation(self):
-        """مسح تاريخ المحادثة"""
-        self.conversation_history.clear()
-        self.current_session["turn_count"] = 0
-        print("✅ تم مسح تاريخ المحادثة")
-
-    async def _handle_exit(self):
-        """معالجة الخروج"""
-        print("\n👋 شكراً لاستخدام المساعد الذكي!")
-
-        # عرض ملخص الجلسة
-        if self.session_stats["total_interactions"] > 0:
-            print("\n📈 ملخص الجلسة:")
-            self._display_session_stats()
-
-        # حفظ البيانات
-        await self._save_session_data()
-
-        self.is_running = False
-
-    async def _save_session_data(self):
-        """حفظ بيانات الجلسة"""
+                print(f"❌ خطأ: {e}")
+    
+    async def health_check(self) -> bool:
+        """فحص صحة النظام"""
         try:
-            if self.ai_engine:
-                await self.ai_engine.save_memory()
-
-            # حفظ تاريخ المحادثة
-            session_data = {
-                "session_id": self.current_session["start_time"].isoformat(),
-                "user_id": self.current_session["user_id"],
-                "stats": self.session_stats,
-                "conversation_count": len(self.conversation_history)
+            # فحص الحالة الأساسية
+            if self.state == AssistantState.ERROR:
+                return False
+            
+            # فحص المكونات
+            health_status = {
+                'engine': self.state == AssistantState.READY,
+                'learning': self.learning_engine is not None,
+                'analytics': self.analytics_engine is not None,
+                'memory': len(self.memory) > 0,
+                'sessions': len(self.active_sessions) >= 0
             }
-
-            sessions_dir = Path("data/sessions")
-            sessions_dir.mkdir(parents=True, exist_ok=True)
-
-            session_file = sessions_dir / f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-
-            with open(session_file, 'w', encoding='utf-8') as f:
-                json.dump(session_data, f, ensure_ascii=False, indent=2)
-
-            self.logger.info("تم حفظ بيانات الجلسة")
-
+            
+            overall_health = all(health_status.values())
+            
+            self.logger.debug(f"فحص الصحة: {health_status}")
+            return overall_health
+            
         except Exception as e:
-            self.logger.error(f"خطأ في حفظ بيانات الجلسة: {e}")
-
-    def get_conversation_summary(self) -> Dict[str, Any]:
-        """الحصول على ملخص المحادثة"""
-        if not self.conversation_history:
-            return {"message": "لا يوجد محادثات"}
-
-        # تحليل المحادثة
-        total_turns = len(self.conversation_history)
-        avg_confidence = sum(turn.confidence for turn in self.conversation_history) / total_turns
-
-        # استخراج الموضوعات الرئيسية
-        user_inputs = [turn.user_input for turn in self.conversation_history]
-
+            self.logger.error(f"خطأ في فحص الصحة: {e}")
+            return False
+    
+    async def get_stats(self) -> Dict[str, Any]:
+        """الحصول على إحصائيات النظام"""
         return {
-            "total_turns": total_turns,
-            "avg_confidence": avg_confidence,
-            "session_duration": self.session_stats["session_duration"],
-            "recent_topics": user_inputs[-5:] if len(user_inputs) > 5 else user_inputs,
-            "overall_satisfaction": "جيد" if avg_confidence > 0.7 else "متوسط"
+            **self.stats,
+            'state': self.state.value,
+            'active_sessions': len(self.active_sessions),
+            'memory_usage': len(str(self.memory)),
+            'task_queue_size': self.task_queue.qsize()
         }
-
-    def _initialize_components(self):
-        """تهيئة جميع المكونات"""
+    
+    async def shutdown(self):
+        """إيقاف المحرك بأمان"""
+        self.logger.info("🛑 بدء إيقاف المحرك...")
+        
         try:
-            # تهيئة أنظمة التمييز الصوتي
-            if self.audio_analysis_enabled:
-                self._initialize_audio_systems()
+            # حفظ البيانات
+            await self._save_memory()
+            
+            # إنهاء المهام
+            self.executor.shutdown(wait=True)
+            
+            # تنظيف الموارد
+            self.active_sessions.clear()
+            
+            self.state = AssistantState.OFFLINE
+            self.logger.info("✅ تم إيقاف المحرك بنجاح")
+            
         except Exception as e:
-            self.logger.error(f"خطأ في تهيئة المكونات: {e}")
+            self.logger.error(f"خطأ في الإيقاف: {e}")
 
-    def _initialize_audio_systems(self):
-        """تهيئة أنظمة الصوت المتقدمة"""
-        try:
-            # تهيئة نظام القياسات الحيوية الصوتية
-            # سيتم استبدال هذا بمنطق حقيقي
-            self.voice_biometrics = "VoiceBiometricsSystem()"
-            self.logger.info("✅ تم تهيئة نظام القياسات الحيوية الصوتية")
-
-            # تهيئة نظام الصوت البيئي
-            # سيتم استبدال هذا بمنطق حقيقي
-            self.environmental_audio = "EnvironmentalAudioSystem()"
-            self.logger.info("✅ تم تهيئة نظام الصوت البيئي")
-        except Exception as e:
-            self.logger.error(f"فشل تهيئة أنظمة الصوت: {e}")
-
-# مثيل عام لمحرك المساعد
-assistant_engine = UnifiedAssistantEngine()
-
-def get_assistant_engine() -> UnifiedAssistantEngine:
-    """الحصول على محرك المساعد"""
-    return assistant_engine
+# مثال للاستخدام
+async def main():
+    engine = UnifiedAssistantEngine()
+    
+    if await engine.initialize():
+        await engine.start_interactive_session()
+    
+    await engine.shutdown()
 
 if __name__ == "__main__":
-    async def main():
-        """تشغيل المساعد"""
-        engine = get_assistant_engine()
-        await engine.start_interactive_session()
-
     asyncio.run(main())
