@@ -1,50 +1,35 @@
-
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-محرك التنبؤ الذكي المتقدم للأنماط والتحليل التنبؤي
-Advanced Smart Prediction Engine for Pattern Analysis
+محرك التنبؤ الذكي المتقدم
+Smart Prediction Engine with Advanced Machine Learning
 """
 
 import asyncio
 import logging
 import numpy as np
 import pandas as pd
-import json
 import pickle
-import warnings
-from typing import Dict, List, Any, Optional, Tuple, Union, Callable
-from pathlib import Path
+import json
+from typing import Dict, List, Any, Optional, Tuple, Union
 from datetime import datetime, timedelta
+from pathlib import Path
 from dataclasses import dataclass, asdict, field
-from enum import Enum
 from collections import defaultdict, deque
-import hashlib
-import threading
-import queue
+import warnings
 warnings.filterwarnings('ignore')
 
 # Machine Learning
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, IsolationForest
-from sklearn.linear_model import LinearRegression, Ridge, Lasso, ElasticNet
-from sklearn.cluster import KMeans, DBSCAN, AgglomerativeClustering
-from sklearn.preprocessing import StandardScaler, MinMaxScaler, LabelEncoder
-from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV
-from sklearn.metrics import mean_squared_error, r2_score, accuracy_score, f1_score
-from sklearn.pipeline import Pipeline
-from sklearn.decomposition import PCA
-from sklearn.manifold import TSNE
-
-# Time Series Analysis
 try:
-    from statsmodels.tsa.arima.model import ARIMA
-    from statsmodels.tsa.seasonal import seasonal_decompose
-    from statsmodels.tsa.holtwinters import ExponentialSmoothing
-    from statsmodels.tsa.statespace.sarimax import SARIMAX
-    TIMESERIES_AVAILABLE = True
+    from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+    from sklearn.linear_model import LinearRegression, Ridge
+    from sklearn.preprocessing import StandardScaler, LabelEncoder
+    from sklearn.model_selection import train_test_split, TimeSeriesSplit
+    from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
+    from sklearn.cluster import KMeans
+    SKLEARN_AVAILABLE = True
 except ImportError:
-    TIMESERIES_AVAILABLE = False
-    logging.warning("مكتبات السلاسل الزمنية غير متوفرة")
+    SKLEARN_AVAILABLE = False
 
 # Deep Learning
 try:
@@ -55,1036 +40,891 @@ try:
     PYTORCH_AVAILABLE = True
 except ImportError:
     PYTORCH_AVAILABLE = False
-    logging.warning("PyTorch غير متوفر للتعلم العميق")
 
-# Advanced Analytics
+# Time Series
 try:
-    import xgboost as xgb
-    import lightgbm as lgb
-    BOOSTING_AVAILABLE = True
+    from statsmodels.tsa.arima.model import ARIMA
+    from statsmodels.tsa.seasonal import seasonal_decompose
+    from statsmodels.tsa.holtwinters import ExponentialSmoothing
+    STATSMODELS_AVAILABLE = True
 except ImportError:
-    BOOSTING_AVAILABLE = False
-    logging.warning("مكتبات التعزيز المتقدمة غير متوفرة")
-
-class PredictionType(Enum):
-    """أنواع التنبؤ"""
-    TIME_SERIES = "time_series"          # سلاسل زمنية
-    CLASSIFICATION = "classification"    # تصنيف
-    REGRESSION = "regression"           # انحدار
-    CLUSTERING = "clustering"           # تجميع
-    ANOMALY_DETECTION = "anomaly"       # كشف الشذوذ
-    PATTERN_RECOGNITION = "pattern"     # تمييز الأنماط
-    TREND_ANALYSIS = "trend"            # تحليل الاتجاهات
-    FORECASTING = "forecasting"         # توقعات مستقبلية
-
-class ModelComplexity(Enum):
-    """مستويات تعقيد النموذج"""
-    SIMPLE = "simple"        # بسيط
-    MODERATE = "moderate"    # متوسط
-    COMPLEX = "complex"      # معقد
-    DEEP = "deep"           # عميق
-
-class DataPattern(Enum):
-    """أنماط البيانات"""
-    LINEAR = "linear"                # خطي
-    NON_LINEAR = "non_linear"        # غير خطي
-    SEASONAL = "seasonal"            # موسمي
-    CYCLIC = "cyclic"               # دوري
-    TRENDING = "trending"           # اتجاهي
-    RANDOM = "random"               # عشوائي
-    MIXED = "mixed"                 # مختلط
+    STATSMODELS_AVAILABLE = False
 
 @dataclass
 class PredictionRequest:
     """طلب التنبؤ"""
     request_id: str
-    prediction_type: PredictionType
-    data: Dict[str, Any]
-    target_variable: Optional[str] = None
-    prediction_horizon: int = 10
+    user_id: str
+    prediction_type: str
+    input_data: Dict[str, Any]
+    time_horizon: timedelta
     confidence_level: float = 0.95
-    model_complexity: ModelComplexity = ModelComplexity.MODERATE
-    features: List[str] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
-    created_at: datetime = field(default_factory=datetime.now)
+    timestamp: datetime = field(default_factory=datetime.now)
 
 @dataclass
 class PredictionResult:
     """نتيجة التنبؤ"""
+    prediction_id: str
     request_id: str
-    predictions: List[float]
-    confidence_intervals: Optional[List[Tuple[float, float]]] = None
-    feature_importance: Optional[Dict[str, float]] = None
-    model_performance: Dict[str, float] = field(default_factory=dict)
-    detected_patterns: List[str] = field(default_factory=list)
-    anomalies: List[int] = field(default_factory=list)
-    recommendations: List[str] = field(default_factory=list)
-    processing_time: float = 0.0
-    created_at: datetime = field(default_factory=datetime.now)
+    predicted_value: Any
+    confidence_score: float
+    prediction_interval: Tuple[float, float]
+    feature_importance: Dict[str, float]
+    model_used: str
+    accuracy_metrics: Dict[str, float]
+    explanation: str
+    recommendations: List[str]
+    timestamp: datetime = field(default_factory=datetime.now)
 
 @dataclass
-class PatternAnalysis:
-    """تحليل الأنماط"""
-    pattern_type: DataPattern
-    strength: float  # 0-1
-    frequency: Optional[float] = None
-    phase: Optional[float] = None
-    trend_direction: Optional[str] = None
-    seasonal_components: Optional[Dict[str, float]] = None
-    description: str = ""
+class PredictionModel:
+    """نموذج التنبؤ"""
+    model_id: str
+    model_type: str
+    model_object: Any
+    performance_metrics: Dict[str, float]
+    feature_names: List[str]
+    last_trained: datetime
+    training_data_size: int
+    is_active: bool = True
 
-class AdvancedNeuralPredictor(nn.Module):
-    """شبكة عصبية متقدمة للتنبؤ"""
-    
-    def __init__(self, input_size: int, hidden_sizes: List[int], output_size: int, dropout_rate: float = 0.2):
+class LSTMPredictor(nn.Module):
+    """شبكة LSTM للتنبؤ"""
+
+    def __init__(self, input_size: int, hidden_size: int = 64, num_layers: int = 2, output_size: int = 1):
         super().__init__()
-        
-        self.layers = nn.ModuleList()
-        self.dropout_layers = nn.ModuleList()
-        self.batch_norms = nn.ModuleList()
-        
-        # بناء الطبقات
-        prev_size = input_size
-        for hidden_size in hidden_sizes:
-            self.layers.append(nn.Linear(prev_size, hidden_size))
-            self.dropout_layers.append(nn.Dropout(dropout_rate))
-            self.batch_norms.append(nn.BatchNorm1d(hidden_size))
-            prev_size = hidden_size
-        
-        # طبقة الإخراج
-        self.output_layer = nn.Linear(prev_size, output_size)
-        
-        # طبقات الانتباه (Attention)
-        self.attention = nn.MultiheadAttention(embed_dim=prev_size, num_heads=4, batch_first=True)
-        
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+
+        self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True, dropout=0.2)
+        self.fc = nn.Linear(hidden_size, output_size)
+        self.dropout = nn.Dropout(0.1)
+
     def forward(self, x):
-        # إضافة بُعد للتسلسل إذا لزم الأمر
-        if len(x.shape) == 2:
-            x = x.unsqueeze(1)  # (batch_size, 1, features)
-        
-        # تطبيق طبقات الانتباه
-        attn_output, _ = self.attention(x, x, x)
-        x = attn_output.squeeze(1)
-        
-        # تطبيق الطبقات المخفية
-        for i, layer in enumerate(self.layers):
-            x = layer(x)
-            if x.size(0) > 1:  # تطبيق BatchNorm فقط إذا كان هناك أكثر من عينة
-                x = self.batch_norms[i](x)
-            x = torch.relu(x)
-            x = self.dropout_layers[i](x)
-        
-        x = self.output_layer(x)
-        return x
+        h0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(x.device)
+        c0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(x.device)
+
+        out, _ = self.lstm(x, (h0, c0))
+        out = self.dropout(out[:, -1, :])
+        out = self.fc(out)
+
+        return out
 
 class SmartPredictionEngine:
     """محرك التنبؤ الذكي المتقدم"""
-    
-    def __init__(self, config: Dict[str, Any] = None):
+
+    def __init__(self):
         self.logger = logging.getLogger(__name__)
-        self.config = config or {}
-        
-        # النماذج المختلفة
-        self.models: Dict[str, Any] = {}
-        self.model_performance: Dict[str, Dict[str, float]] = {}
-        self.pattern_analyzers: Dict[str, Any] = {}
-        
+
+        # حالة المحرك
+        self.is_initialized = False
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        # النماذج
+        self.models: Dict[str, PredictionModel] = {}
+        self.model_selector = None
+
         # معالجات البيانات
         self.scalers: Dict[str, StandardScaler] = {}
         self.encoders: Dict[str, LabelEncoder] = {}
-        self.feature_selectors: Dict[str, Any] = {}
-        
-        # ذاكرة التخزين المؤقت
-        self.prediction_cache: Dict[str, PredictionResult] = {}
-        self.pattern_cache: Dict[str, List[PatternAnalysis]] = {}
-        
-        # إحصائيات ومقاييس
-        self.request_history: List[PredictionRequest] = []
-        self.performance_metrics: Dict[str, float] = {}
-        self.model_usage_stats: Dict[str, int] = defaultdict(int)
-        
-        # خيوط المعالجة
-        self.prediction_queue = queue.Queue()
-        self.processing_thread = None
-        self.is_running = False
-        
+
+        # تاريخ التنبؤات
+        self.prediction_history = deque(maxlen=10000)
+        self.model_performance_history = defaultdict(list)
+
+        # مخزن البيانات
+        self.training_data: Dict[str, pd.DataFrame] = {}
+        self.feature_store = {}
+
+        # إحصائيات الأداء
+        self.performance_stats = {
+            "total_predictions": 0,
+            "successful_predictions": 0,
+            "average_accuracy": 0.0,
+            "models_trained": 0,
+            "avg_processing_time": 0.0
+        }
+
         # مسارات الحفظ
         self.models_dir = Path("data/prediction_models")
         self.models_dir.mkdir(parents=True, exist_ok=True)
-        
-        # تهيئة النماذج
-        self._initialize_models()
-        
-        self.logger.info("تم تهيئة محرك التنبؤ الذكي المتقدم")
 
-    def _initialize_models(self):
-        """تهيئة النماذج الأساسية"""
+        # إعدادات التنبؤ
+        self.prediction_config = {
+            "min_training_samples": 50,
+            "retrain_threshold": 0.1,  # تراجع في الدقة
+            "max_models_per_type": 5,
+            "ensemble_threshold": 3,  # عدد النماذج للتصويت
+            "confidence_threshold": 0.7
+        }
+
+    async def initialize(self):
+        """تهيئة محرك التنبؤ"""
+        self.logger.info("🔮 تهيئة محرك التنبؤ الذكي المتقدم...")
+
         try:
-            # النماذج التقليدية
-            self.models['linear_regression'] = LinearRegression()
-            self.models['ridge_regression'] = Ridge(alpha=1.0)
-            self.models['random_forest'] = RandomForestRegressor(n_estimators=100, random_state=42)
-            self.models['gradient_boosting'] = GradientBoostingRegressor(n_estimators=100, random_state=42)
-            
-            # نماذج التجميع
-            self.models['kmeans'] = KMeans(n_clusters=5, random_state=42)
-            self.models['dbscan'] = DBSCAN(eps=0.5, min_samples=5)
-            
-            # كشف الشذوذ
-            self.models['isolation_forest'] = IsolationForest(contamination=0.1, random_state=42)
-            
-            # نماذج متقدمة إذا كانت متوفرة
-            if BOOSTING_AVAILABLE:
-                self.models['xgboost'] = xgb.XGBRegressor(random_state=42)
-                self.models['lightgbm'] = lgb.LGBMRegressor(random_state=42)
-            
-            # محللات الأنماط
-            self.pattern_analyzers['trend'] = self._analyze_trend
-            self.pattern_analyzers['seasonality'] = self._analyze_seasonality
-            self.pattern_analyzers['cyclical'] = self._analyze_cyclical_patterns
-            
-        except Exception as e:
-            self.logger.error(f"خطأ في تهيئة النماذج: {e}")
+            # تحميل النماذج المحفوظة
+            await self._load_saved_models()
 
-    async def start_prediction_engine(self):
-        """بدء محرك التنبؤ"""
+            # تهيئة محدد النماذج
+            await self._initialize_model_selector()
+
+            # تحميل البيانات التدريبية
+            await self._load_training_data()
+
+            self.is_initialized = True
+            self.logger.info("✅ تم تهيئة محرك التنبؤ بنجاح")
+
+        except Exception as e:
+            self.logger.error(f"❌ فشل تهيئة محرك التنبؤ: {e}")
+            # تهيئة أساسية
+            self.is_initialized = True
+
+    async def _load_saved_models(self):
+        """تحميل النماذج المحفوظة"""
         try:
-            self.is_running = True
-            self.processing_thread = threading.Thread(target=self._prediction_processing_loop)
-            self.processing_thread.start()
-            self.logger.info("تم بدء محرك التنبؤ")
-            
-        except Exception as e:
-            self.logger.error(f"خطأ في بدء محرك التنبؤ: {e}")
-            raise
+            model_files = list(self.models_dir.glob("*.pkl"))
 
-    async def stop_prediction_engine(self):
-        """إيقاف محرك التنبؤ"""
-        try:
-            self.is_running = False
-            if self.processing_thread and self.processing_thread.is_alive():
-                self.processing_thread.join(timeout=5)
-            
-            await self.save_models()
-            self.logger.info("تم إيقاف محرك التنبؤ")
-            
-        except Exception as e:
-            self.logger.error(f"خطأ في إيقاف محرك التنبؤ: {e}")
-
-    def _prediction_processing_loop(self):
-        """حلقة معالجة طلبات التنبؤ"""
-        while self.is_running:
-            try:
+            for model_file in model_files:
                 try:
-                    request = self.prediction_queue.get(timeout=1)
-                    asyncio.create_task(self._process_prediction_request(request))
-                except queue.Empty:
-                    continue
-                    
-            except Exception as e:
-                self.logger.error(f"خطأ في حلقة معالجة التنبؤ: {e}")
+                    with open(model_file, 'rb') as f:
+                        model_data = pickle.load(f)
+
+                    self.models[model_data['model_id']] = PredictionModel(**model_data)
+                    self.logger.info(f"✅ تم تحميل النموذج: {model_data['model_id']}")
+
+                except Exception as e:
+                    self.logger.warning(f"⚠️ فشل تحميل النموذج {model_file}: {e}")
+
+            if self.models:
+                self.logger.info(f"📊 تم تحميل {len(self.models)} نموذج")
+
+        except Exception as e:
+            self.logger.error(f"خطأ في تحميل النماذج: {e}")
+
+    async def _initialize_model_selector(self):
+        """تهيئة محدد النماذج"""
+        try:
+            if SKLEARN_AVAILABLE:
+                # نموذج لاختيار أفضل نموذج تنبؤ
+                self.model_selector = RandomForestRegressor(
+                    n_estimators=50,
+                    random_state=42
+                )
+
+                self.logger.info("✅ تم تهيئة محدد النماذج")
+
+        except Exception as e:
+            self.logger.warning(f"⚠️ خطأ في تهيئة محدد النماذج: {e}")
+
+    async def _load_training_data(self):
+        """تحميل البيانات التدريبية"""
+        try:
+            data_dir = Path("data/training")
+            if data_dir.exists():
+                for data_file in data_dir.glob("*.csv"):
+                    try:
+                        df = pd.read_csv(data_file)
+                        dataset_name = data_file.stem
+                        self.training_data[dataset_name] = df
+
+                        self.logger.info(f"✅ تم تحميل بيانات: {dataset_name}")
+
+                    except Exception as e:
+                        self.logger.warning(f"⚠️ فشل تحميل {data_file}: {e}")
+
+        except Exception as e:
+            self.logger.error(f"خطأ في تحميل البيانات التدريبية: {e}")
 
     async def predict(self, request: PredictionRequest) -> PredictionResult:
-        """تنفيذ طلب التنبؤ"""
+        """تنفيذ التنبؤ"""
+        start_time = datetime.now()
+
         try:
-            start_time = datetime.now()
-            
-            # التحقق من وجود نتيجة مخزنة مؤقتاً
-            cache_key = self._generate_cache_key(request)
-            if cache_key in self.prediction_cache:
-                cached_result = self.prediction_cache[cache_key]
-                if (datetime.now() - cached_result.created_at).total_seconds() < 3600:  # ساعة واحدة
-                    return cached_result
-            
+            self.performance_stats["total_predictions"] += 1
+
+            # اختيار أفضل نموذج
+            best_model = await self._select_best_model(request)
+
+            if not best_model:
+                # إنشاء نموذج جديد
+                best_model = await self._create_new_model(request)
+
             # تحضير البيانات
-            processed_data = await self._prepare_data(request)
-            
-            # تحليل الأنماط
-            patterns = await self._analyze_patterns(processed_data, request)
-            
-            # اختيار النموذج المناسب
-            best_model = await self._select_best_model(processed_data, request, patterns)
-            
+            processed_data = await self._prepare_prediction_data(request, best_model)
+
             # تنفيذ التنبؤ
-            predictions = await self._execute_prediction(best_model, processed_data, request)
-            
-            # حساب فترات الثقة
-            confidence_intervals = await self._calculate_confidence_intervals(
-                predictions, processed_data, request
+            prediction_value = await self._execute_prediction(best_model, processed_data)
+
+            # حساب الثقة والفترة
+            confidence, interval = await self._calculate_confidence(
+                best_model, processed_data, prediction_value
             )
-            
-            # كشف الشذوذ
-            anomalies = await self._detect_anomalies(processed_data, predictions)
-            
-            # تحليل أهمية الميزات
-            feature_importance = await self._analyze_feature_importance(best_model, processed_data)
-            
-            # إنشاء التوصيات
-            recommendations = await self._generate_recommendations(
-                predictions, patterns, anomalies, request
-            )
-            
-            # حساب مقاييس الأداء
-            performance = await self._evaluate_model_performance(best_model, processed_data, request)
-            
+
+            # توليد التفسير والتوصيات
+            explanation = await self._generate_explanation(best_model, processed_data, prediction_value)
+            recommendations = await self._generate_recommendations(request, prediction_value)
+
             # إنشاء النتيجة
-            processing_time = (datetime.now() - start_time).total_seconds()
-            
             result = PredictionResult(
+                prediction_id=f"pred_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{request.user_id}",
                 request_id=request.request_id,
-                predictions=predictions.tolist() if isinstance(predictions, np.ndarray) else predictions,
-                confidence_intervals=confidence_intervals,
-                feature_importance=feature_importance,
-                model_performance=performance,
-                detected_patterns=[p.pattern_type.value for p in patterns],
-                anomalies=anomalies,
-                recommendations=recommendations,
-                processing_time=processing_time
+                predicted_value=prediction_value,
+                confidence_score=confidence,
+                prediction_interval=interval,
+                feature_importance=await self._get_feature_importance(best_model),
+                model_used=best_model.model_id,
+                accuracy_metrics=best_model.performance_metrics,
+                explanation=explanation,
+                recommendations=recommendations
             )
-            
-            # حفظ في الذاكرة المؤقتة
-            self.prediction_cache[cache_key] = result
-            
+
+            # حفظ في التاريخ
+            self.prediction_history.append(result)
+
             # تحديث الإحصائيات
-            self.request_history.append(request)
-            self.model_usage_stats[best_model] += 1
-            
+            processing_time = (datetime.now() - start_time).total_seconds()
+            self.performance_stats["successful_predictions"] += 1
+            self._update_performance_stats(processing_time)
+
+            self.logger.info(f"✅ تم التنبؤ بنجاح: {result.prediction_id}")
+
             return result
-            
-        except Exception as e:
-            self.logger.error(f"خطأ في تنفيذ التنبؤ: {e}")
-            raise
 
-    async def _prepare_data(self, request: PredictionRequest) -> Dict[str, Any]:
-        """تحضير البيانات للتنبؤ"""
-        try:
-            data = request.data
-            
-            # تحويل البيانات إلى DataFrame
-            if isinstance(data, dict):
-                if 'dataframe' in data:
-                    df = pd.DataFrame(data['dataframe'])
-                elif 'series' in data:
-                    df = pd.DataFrame({'value': data['series']})
-                else:
-                    df = pd.DataFrame([data])
-            else:
-                df = pd.DataFrame(data)
-            
-            # معالجة القيم المفقودة
-            df = df.fillna(df.mean(numeric_only=True))
-            
-            # ترميز المتغيرات الفئوية
-            categorical_columns = df.select_dtypes(include=['object']).columns
-            for col in categorical_columns:
-                if col not in self.encoders:
-                    self.encoders[col] = LabelEncoder()
-                    df[col] = self.encoders[col].fit_transform(df[col].astype(str))
-                else:
-                    df[col] = self.encoders[col].transform(df[col].astype(str))
-            
-            # تطبيع البيانات الرقمية
-            numeric_columns = df.select_dtypes(include=[np.number]).columns
-            if len(numeric_columns) > 0:
-                scaler_key = f"scaler_{request.prediction_type.value}"
-                if scaler_key not in self.scalers:
-                    self.scalers[scaler_key] = StandardScaler()
-                    df[numeric_columns] = self.scalers[scaler_key].fit_transform(df[numeric_columns])
-                else:
-                    df[numeric_columns] = self.scalers[scaler_key].transform(df[numeric_columns])
-            
-            # استخراج الميزات الزمنية إذا كان هناك عمود تاريخ
-            if 'timestamp' in df.columns or 'date' in df.columns:
-                time_col = 'timestamp' if 'timestamp' in df.columns else 'date'
-                df[time_col] = pd.to_datetime(df[time_col])
-                df['hour'] = df[time_col].dt.hour
-                df['day_of_week'] = df[time_col].dt.dayofweek
-                df['month'] = df[time_col].dt.month
-                df['quarter'] = df[time_col].dt.quarter
-            
-            return {
-                'dataframe': df,
-                'target_variable': request.target_variable,
-                'features': request.features or list(df.columns),
-                'original_data': data
-            }
-            
         except Exception as e:
-            self.logger.error(f"خطأ في تحضير البيانات: {e}")
-            raise
+            self.logger.error(f"❌ فشل التنبؤ: {e}")
 
-    async def _analyze_patterns(self, data: Dict[str, Any], request: PredictionRequest) -> List[PatternAnalysis]:
-        """تحليل الأنماط في البيانات"""
-        try:
-            df = data['dataframe']
-            patterns = []
-            
-            # تحليل الاتجاه العام
-            if request.target_variable and request.target_variable in df.columns:
-                target_series = df[request.target_variable]
-                
-                # تحليل الاتجاه
-                trend_analysis = await self._analyze_trend(target_series)
-                if trend_analysis:
-                    patterns.append(trend_analysis)
-                
-                # تحليل الموسمية
-                if len(target_series) >= 24:  # بيانات كافية للتحليل الموسمي
-                    seasonal_analysis = await self._analyze_seasonality(target_series)
-                    if seasonal_analysis:
-                        patterns.append(seasonal_analysis)
-                
-                # تحليل الدورية
-                cyclical_analysis = await self._analyze_cyclical_patterns(target_series)
-                if cyclical_analysis:
-                    patterns.append(cyclical_analysis)
-            
-            # تحليل العلاقات بين المتغيرات
-            correlation_patterns = await self._analyze_correlations(df)
-            patterns.extend(correlation_patterns)
-            
-            return patterns
-            
-        except Exception as e:
-            self.logger.error(f"خطأ في تحليل الأنماط: {e}")
-            return []
+            # نتيجة احتياطية
+            return PredictionResult(
+                prediction_id=f"pred_error_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                request_id=request.request_id,
+                predicted_value=None,
+                confidence_score=0.0,
+                prediction_interval=(0.0, 0.0),
+                feature_importance={},
+                model_used="error",
+                accuracy_metrics={"error": str(e)},
+                explanation="حدث خطأ في التنبؤ",
+                recommendations=["يرجى المحاولة مرة أخرى"]
+            )
 
-    async def _analyze_trend(self, series: pd.Series) -> Optional[PatternAnalysis]:
-        """تحليل الاتجاه في السلسلة الزمنية"""
-        try:
-            # حساب الاتجاه باستخدام الانحدار الخطي
-            x = np.arange(len(series))
-            coeffs = np.polyfit(x, series, 1)
-            slope = coeffs[0]
-            
-            # تحديد قوة الاتجاه
-            correlation = np.corrcoef(x, series)[0, 1]
-            strength = abs(correlation)
-            
-            if strength > 0.5:  # اتجاه قوي
-                direction = "صاعد" if slope > 0 else "هابط"
-                
-                return PatternAnalysis(
-                    pattern_type=DataPattern.TRENDING,
-                    strength=strength,
-                    trend_direction=direction,
-                    description=f"اتجاه {direction} بقوة {strength:.2f}"
-                )
-            
-            return None
-            
-        except Exception as e:
-            self.logger.error(f"خطأ في تحليل الاتجاه: {e}")
-            return None
-
-    async def _analyze_seasonality(self, series: pd.Series) -> Optional[PatternAnalysis]:
-        """تحليل الموسمية في السلسلة الزمنية"""
-        try:
-            if not TIMESERIES_AVAILABLE or len(series) < 24:
-                return None
-            
-            # تحليل الموسمية
-            decomposition = seasonal_decompose(series, model='additive', period=12)
-            seasonal_component = decomposition.seasonal
-            
-            # حساب قوة الموسمية
-            seasonal_strength = np.var(seasonal_component) / np.var(series)
-            
-            if seasonal_strength > 0.1:  # موسمية واضحة
-                return PatternAnalysis(
-                    pattern_type=DataPattern.SEASONAL,
-                    strength=seasonal_strength,
-                    seasonal_components={
-                        'amplitude': np.max(seasonal_component) - np.min(seasonal_component),
-                        'period': 12
-                    },
-                    description=f"نمط موسمي بقوة {seasonal_strength:.2f}"
-                )
-            
-            return None
-            
-        except Exception as e:
-            self.logger.error(f"خطأ في تحليل الموسمية: {e}")
-            return None
-
-    async def _analyze_cyclical_patterns(self, series: pd.Series) -> Optional[PatternAnalysis]:
-        """تحليل الأنماط الدورية"""
-        try:
-            # تحليل FFT للعثور على الترددات المهيمنة
-            fft = np.fft.fft(series.values)
-            freqs = np.fft.fftfreq(len(series))
-            
-            # العثور على أقوى تردد
-            dominant_freq_idx = np.argmax(np.abs(fft[1:len(fft)//2])) + 1
-            dominant_freq = freqs[dominant_freq_idx]
-            
-            if abs(dominant_freq) > 0.01:  # تردد واضح
-                period = 1 / abs(dominant_freq)
-                strength = np.abs(fft[dominant_freq_idx]) / np.sum(np.abs(fft))
-                
-                if strength > 0.1:
-                    return PatternAnalysis(
-                        pattern_type=DataPattern.CYCLIC,
-                        strength=strength,
-                        frequency=abs(dominant_freq),
-                        description=f"نمط دوري بفترة {period:.1f} وقوة {strength:.2f}"
-                    )
-            
-            return None
-            
-        except Exception as e:
-            self.logger.error(f"خطأ في تحليل الأنماط الدورية: {e}")
-            return None
-
-    async def _analyze_correlations(self, df: pd.DataFrame) -> List[PatternAnalysis]:
-        """تحليل العلاقات بين المتغيرات"""
-        try:
-            patterns = []
-            numeric_columns = df.select_dtypes(include=[np.number]).columns
-            
-            if len(numeric_columns) > 1:
-                correlation_matrix = df[numeric_columns].corr()
-                
-                # البحث عن ارتباطات قوية
-                for i in range(len(correlation_matrix.columns)):
-                    for j in range(i+1, len(correlation_matrix.columns)):
-                        correlation = correlation_matrix.iloc[i, j]
-                        
-                        if abs(correlation) > 0.7:  # ارتباط قوي
-                            col1 = correlation_matrix.columns[i]
-                            col2 = correlation_matrix.columns[j]
-                            
-                            pattern = PatternAnalysis(
-                                pattern_type=DataPattern.LINEAR if correlation > 0 else DataPattern.NON_LINEAR,
-                                strength=abs(correlation),
-                                description=f"ارتباط {'إيجابي' if correlation > 0 else 'سلبي'} قوي بين {col1} و {col2}"
-                            )
-                            patterns.append(pattern)
-            
-            return patterns
-            
-        except Exception as e:
-            self.logger.error(f"خطأ في تحليل الارتباطات: {e}")
-            return []
-
-    async def _select_best_model(
-        self, 
-        data: Dict[str, Any], 
-        request: PredictionRequest, 
-        patterns: List[PatternAnalysis]
-    ) -> str:
+    async def _select_best_model(self, request: PredictionRequest) -> Optional[PredictionModel]:
         """اختيار أفضل نموذج للتنبؤ"""
         try:
-            df = data['dataframe']
-            prediction_type = request.prediction_type
-            complexity = request.model_complexity
-            
-            # اختيار النموذج بناءً على نوع التنبؤ
-            if prediction_type == PredictionType.TIME_SERIES:
-                # للسلاسل الزمنية
-                if any(p.pattern_type == DataPattern.SEASONAL for p in patterns):
-                    return 'arima' if TIMESERIES_AVAILABLE else 'gradient_boosting'
-                elif any(p.pattern_type == DataPattern.TRENDING for p in patterns):
-                    return 'linear_regression'
-                else:
-                    return 'random_forest'
-                    
-            elif prediction_type == PredictionType.CLASSIFICATION:
-                if complexity == ModelComplexity.SIMPLE:
-                    return 'linear_regression'  # للتصنيف البسيط
-                elif complexity == ModelComplexity.COMPLEX:
-                    return 'xgboost' if BOOSTING_AVAILABLE else 'gradient_boosting'
-                else:
-                    return 'random_forest'
-                    
-            elif prediction_type == PredictionType.REGRESSION:
-                if any(p.pattern_type == DataPattern.LINEAR for p in patterns):
-                    return 'linear_regression'
-                elif complexity == ModelComplexity.COMPLEX:
-                    return 'xgboost' if BOOSTING_AVAILABLE else 'gradient_boosting'
-                else:
-                    return 'random_forest'
-                    
-            elif prediction_type == PredictionType.CLUSTERING:
-                return 'kmeans'
-                
-            elif prediction_type == PredictionType.ANOMALY_DETECTION:
-                return 'isolation_forest'
-            
-            # النموذج الافتراضي
-            return 'random_forest'
-            
+            # تصفية النماذج المناسبة
+            suitable_models = [
+                model for model in self.models.values()
+                if model.is_active and model.model_type == request.prediction_type
+            ]
+
+            if not suitable_models:
+                return None
+
+            # ترتيب النماذج حسب الأداء
+            suitable_models.sort(
+                key=lambda m: m.performance_metrics.get('accuracy', 0.0),
+                reverse=True
+            )
+
+            return suitable_models[0]
+
         except Exception as e:
             self.logger.error(f"خطأ في اختيار النموذج: {e}")
-            return 'random_forest'
+            return None
 
-    async def _execute_prediction(
-        self, 
-        model_name: str, 
-        data: Dict[str, Any], 
-        request: PredictionRequest
-    ) -> np.ndarray:
-        """تنفيذ التنبؤ بالنموذج المحدد"""
+    async def _create_new_model(self, request: PredictionRequest) -> PredictionModel:
+        """إنشاء نموذج جديد"""
         try:
-            df = data['dataframe']
-            target_variable = data['target_variable']
-            
-            if model_name == 'arima' and TIMESERIES_AVAILABLE:
-                return await self._predict_with_arima(df, target_variable, request)
-            
-            # تحضير البيانات للنماذج العادية
-            if target_variable and target_variable in df.columns:
-                X = df.drop(columns=[target_variable])
-                y = df[target_variable]
+            model_id = f"{request.prediction_type}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+            # اختيار نوع النموذج بناءً على طبيعة البيانات
+            if request.prediction_type == "time_series":
+                model_object = await self._create_time_series_model()
+            elif request.prediction_type == "regression":
+                model_object = await self._create_regression_model()
+            elif request.prediction_type == "classification":
+                model_object = await self._create_classification_model()
             else:
-                X = df
-                y = None
-            
-            model = self.models[model_name]
-            
-            # تدريب النموذج إذا لم يكن مدرباً
-            if hasattr(model, 'fit') and y is not None:
-                model.fit(X, y)
-            
-            # التنبؤ
-            if request.prediction_type == PredictionType.CLUSTERING:
-                predictions = model.fit_predict(X)
-            elif hasattr(model, 'predict'):
-                if request.prediction_horizon > len(X):
-                    # للتنبؤ المستقبلي، نستخدم آخر القيم
-                    last_values = X.tail(1)
-                    predictions = []
-                    for _ in range(request.prediction_horizon):
-                        pred = model.predict(last_values)[0]
-                        predictions.append(pred)
-                        # تحديث القيم للتنبؤ التالي (بسيط)
-                        last_values.iloc[0, -1] = pred
-                    predictions = np.array(predictions)
-                else:
-                    predictions = model.predict(X[:request.prediction_horizon])
+                model_object = await self._create_general_model()
+
+            # إنشاء نموذج التنبؤ
+            prediction_model = PredictionModel(
+                model_id=model_id,
+                model_type=request.prediction_type,
+                model_object=model_object,
+                performance_metrics={},
+                feature_names=[],
+                last_trained=datetime.now(),
+                training_data_size=0
+            )
+
+            # تدريب النموذج إذا توفرت بيانات
+            await self._train_model(prediction_model, request)
+
+            # حفظ النموذج
+            self.models[model_id] = prediction_model
+            await self._save_model(prediction_model)
+
+            self.performance_stats["models_trained"] += 1
+
+            return prediction_model
+
+        except Exception as e:
+            self.logger.error(f"خطأ في إنشاء النموذج الجديد: {e}")
+            raise
+
+    async def _create_time_series_model(self):
+        """إنشاء نموذج السلاسل الزمنية"""
+        if PYTORCH_AVAILABLE:
+            return LSTMPredictor(input_size=10, hidden_size=64, num_layers=2)
+        elif SKLEARN_AVAILABLE:
+            return RandomForestRegressor(n_estimators=100, random_state=42)
+        else:
+            return None
+
+    async def _create_regression_model(self):
+        """إنشاء نموذج الانحدار"""
+        if SKLEARN_AVAILABLE:
+            return GradientBoostingRegressor(n_estimators=100, random_state=42)
+        else:
+            return None
+
+    async def _create_classification_model(self):
+        """إنشاء نموذج التصنيف"""
+        if SKLEARN_AVAILABLE:
+            from sklearn.ensemble import RandomForestClassifier
+            return RandomForestClassifier(n_estimators=100, random_state=42)
+        else:
+            return None
+
+    async def _create_general_model(self):
+        """إنشاء نموذج عام"""
+        if SKLEARN_AVAILABLE:
+            return RandomForestRegressor(n_estimators=50, random_state=42)
+        else:
+            return None
+
+    async def _train_model(self, model: PredictionModel, request: PredictionRequest):
+        """تدريب النموذج"""
+        try:
+            # البحث عن بيانات تدريبية مناسبة
+            training_data = await self._get_training_data(request.prediction_type)
+
+            if training_data is None or len(training_data) < self.prediction_config["min_training_samples"]:
+                self.logger.warning("لا توجد بيانات تدريبية كافية")
+                return
+
+            # تحضير البيانات
+            X, y = await self._prepare_training_data(training_data, request)
+
+            if X is None or y is None:
+                return
+
+            # تقسيم البيانات
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=0.2, random_state=42
+            )
+
+            # تدريب النموذج
+            if PYTORCH_AVAILABLE and isinstance(model.model_object, nn.Module):
+                await self._train_neural_model(model, X_train, y_train, X_test, y_test)
+            elif SKLEARN_AVAILABLE:
+                await self._train_sklearn_model(model, X_train, y_train, X_test, y_test)
+
+            # تحديث معلومات النموذج
+            model.feature_names = list(X.columns) if isinstance(X, pd.DataFrame) else [f"feature_{i}" for i in range(X.shape[1])]
+            model.training_data_size = len(training_data)
+            model.last_trained = datetime.now()
+
+            self.logger.info(f"✅ تم تدريب النموذج: {model.model_id}")
+
+        except Exception as e:
+            self.logger.error(f"خطأ في تدريب النموذج: {e}")
+
+    async def _train_neural_model(self, model: PredictionModel, X_train, y_train, X_test, y_test):
+        """تدريب النموذج العصبي"""
+        try:
+            model.model_object.to(self.device)
+
+            # تحويل البيانات
+            X_train_tensor = torch.FloatTensor(X_train.values if isinstance(X_train, pd.DataFrame) else X_train)
+            y_train_tensor = torch.FloatTensor(y_train.values if isinstance(y_train, pd.Series) else y_train)
+            X_test_tensor = torch.FloatTensor(X_test.values if isinstance(X_test, pd.DataFrame) else X_test)
+            y_test_tensor = torch.FloatTensor(y_test.values if isinstance(y_test, pd.Series) else y_test)
+
+            # إعداد التدريب
+            optimizer = optim.Adam(model.model_object.parameters(), lr=0.001)
+            criterion = nn.MSELoss()
+
+            # التدريب
+            model.model_object.train()
+            for epoch in range(100):
+                optimizer.zero_grad()
+                outputs = model.model_object(X_train_tensor.unsqueeze(1))
+                loss = criterion(outputs.squeeze(), y_train_tensor)
+                loss.backward()
+                optimizer.step()
+
+            # التقييم
+            model.model_object.eval()
+            with torch.no_grad():
+                test_outputs = model.model_object(X_test_tensor.unsqueeze(1))
+                test_predictions = test_outputs.squeeze().cpu().numpy()
+
+                mse = mean_squared_error(y_test, test_predictions)
+                r2 = r2_score(y_test, test_predictions)
+
+                model.performance_metrics = {
+                    "mse": float(mse),
+                    "r2": float(r2),
+                    "accuracy": float(max(0, r2))  # استخدام R² كمقياس دقة
+                }
+
+        except Exception as e:
+            self.logger.error(f"خطأ في تدريب النموذج العصبي: {e}")
+
+    async def _train_sklearn_model(self, model: PredictionModel, X_train, y_train, X_test, y_test):
+        """تدريب نموذج sklearn"""
+        try:
+            # تدريب النموذج
+            model.model_object.fit(X_train, y_train)
+
+            # التنبؤ على بيانات الاختبار
+            y_pred = model.model_object.predict(X_test)
+
+            # حساب المقاييس
+            mse = mean_squared_error(y_test, y_pred)
+            mae = mean_absolute_error(y_test, y_pred)
+            r2 = r2_score(y_test, y_pred)
+
+            model.performance_metrics = {
+                "mse": float(mse),
+                "mae": float(mae),
+                "r2": float(r2),
+                "accuracy": float(max(0, r2))
+            }
+
+        except Exception as e:
+            self.logger.error(f"خطأ في تدريب نموذج sklearn: {e}")
+
+    async def _get_training_data(self, prediction_type: str) -> Optional[pd.DataFrame]:
+        """الحصول على بيانات التدريب"""
+        try:
+            # البحث في البيانات المحفوظة
+            for dataset_name, data in self.training_data.items():
+                if prediction_type in dataset_name.lower():
+                    return data
+
+            # إنشاء بيانات تجريبية إذا لم توجد
+            return await self._generate_synthetic_data(prediction_type)
+
+        except Exception as e:
+            self.logger.error(f"خطأ في الحصول على بيانات التدريب: {e}")
+            return None
+
+    async def _generate_synthetic_data(self, prediction_type: str) -> pd.DataFrame:
+        """توليد بيانات تجريبية"""
+        try:
+            np.random.seed(42)
+            n_samples = 1000
+
+            if prediction_type == "time_series":
+                # بيانات سلسلة زمنية
+                dates = pd.date_range(start='2023-01-01', periods=n_samples, freq='D')
+                trend = np.linspace(100, 200, n_samples)
+                seasonal = 10 * np.sin(2 * np.pi * np.arange(n_samples) / 365.25)
+                noise = np.random.normal(0, 5, n_samples)
+                values = trend + seasonal + noise
+
+                return pd.DataFrame({
+                    'date': dates,
+                    'value': values,
+                    'target': values + np.random.normal(0, 2, n_samples)
+                })
+
             else:
-                predictions = np.zeros(request.prediction_horizon)
-            
-            return np.array(predictions)
-            
+                # بيانات عامة
+                data = {
+                    'feature_1': np.random.normal(0, 1, n_samples),
+                    'feature_2': np.random.normal(5, 2, n_samples),
+                    'feature_3': np.random.uniform(0, 10, n_samples),
+                    'feature_4': np.random.exponential(2, n_samples)
+                }
+
+                # إنشاء المتغير التابع
+                df = pd.DataFrame(data)
+                df['target'] = (
+                    2 * df['feature_1'] + 
+                    0.5 * df['feature_2'] - 
+                    0.3 * df['feature_3'] + 
+                    0.1 * df['feature_4'] + 
+                    np.random.normal(0, 0.5, n_samples)
+                )
+
+                return df
+
+        except Exception as e:
+            self.logger.error(f"خطأ في توليد البيانات التجريبية: {e}")
+            return pd.DataFrame()
+
+    async def _prepare_training_data(self, data: pd.DataFrame, request: PredictionRequest) -> Tuple[Optional[pd.DataFrame], Optional[pd.Series]]:
+        """تحضير بيانات التدريب"""
+        try:
+            if data.empty:
+                return None, None
+
+            # تحديد المتغير التابع
+            target_column = 'target'
+            if target_column not in data.columns:
+                # اختيار آخر عمود كمتغير تابع
+                target_column = data.columns[-1]
+
+            # فصل الميزات والمتغير التابع
+            X = data.drop(columns=[target_column])
+            y = data[target_column]
+
+            # معالجة البيانات المفقودة
+            X = X.fillna(X.mean() if X.select_dtypes(include=[np.number]).shape[1] > 0 else X.mode().iloc[0])
+            y = y.fillna(y.mean())
+
+            # تشفير البيانات النصية
+            for column in X.select_dtypes(include=['object']).columns:
+                if column not in self.encoders:
+                    self.encoders[column] = LabelEncoder()
+
+                X[column] = self.encoders[column].fit_transform(X[column].astype(str))
+
+            # تطبيع البيانات
+            scaler_key = f"{request.prediction_type}_scaler"
+            if scaler_key not in self.scalers:
+                self.scalers[scaler_key] = StandardScaler()
+
+            X_scaled = pd.DataFrame(
+                self.scalers[scaler_key].fit_transform(X),
+                columns=X.columns,
+                index=X.index
+            )
+
+            return X_scaled, y
+
+        except Exception as e:
+            self.logger.error(f"خطأ في تحضير بيانات التدريب: {e}")
+            return None, None
+
+    async def _prepare_prediction_data(self, request: PredictionRequest, model: PredictionModel) -> Optional[np.ndarray]:
+        """تحضير بيانات التنبؤ"""
+        try:
+            # تحويل بيانات الإدخال إلى DataFrame
+            input_df = pd.DataFrame([request.input_data])
+
+            # التأكد من وجود جميع الميزات المطلوبة
+            for feature in model.feature_names:
+                if feature not in input_df.columns:
+                    input_df[feature] = 0  # قيمة افتراضية
+
+            # ترتيب الأعمدة
+            input_df = input_df[model.feature_names]
+
+            # تطبيق نفس المعالجة المستخدمة في التدريب
+            scaler_key = f"{request.prediction_type}_scaler"
+            if scaler_key in self.scalers:
+                input_scaled = self.scalers[scaler_key].transform(input_df)
+                return input_scaled
+
+            return input_df.values
+
+        except Exception as e:
+            self.logger.error(f"خطأ في تحضير بيانات التنبؤ: {e}")
+            return None
+
+    async def _execute_prediction(self, model: PredictionModel, data: np.ndarray) -> Any:
+        """تنفيذ التنبؤ"""
+        try:
+            if PYTORCH_AVAILABLE and isinstance(model.model_object, nn.Module):
+                # تنبؤ النموذج العصبي
+                model.model_object.eval()
+                with torch.no_grad():
+                    input_tensor = torch.FloatTensor(data)
+                    output = model.model_object(input_tensor.unsqueeze(1))
+                    return float(output.squeeze().cpu().numpy())
+
+            elif SKLEARN_AVAILABLE and hasattr(model.model_object, 'predict'):
+                # تنبؤ نموذج sklearn
+                prediction = model.model_object.predict(data)
+                return float(prediction[0]) if isinstance(prediction, np.ndarray) else float(prediction)
+
+            else:
+                # نموذج افتراضي
+                return float(np.mean(data))
+
         except Exception as e:
             self.logger.error(f"خطأ في تنفيذ التنبؤ: {e}")
-            return np.zeros(request.prediction_horizon)
+            return 0.0
 
-    async def _predict_with_arima(
-        self, 
-        df: pd.DataFrame, 
-        target_variable: str, 
-        request: PredictionRequest
-    ) -> np.ndarray:
-        """التنبؤ باستخدام نموذج ARIMA"""
+    async def _calculate_confidence(self, model: PredictionModel, data: np.ndarray, prediction: Any) -> Tuple[float, Tuple[float, float]]:
+        """حساب الثقة وفترة التنبؤ"""
         try:
-            series = df[target_variable]
-            
-            # تدريب نموذج ARIMA
-            model = ARIMA(series, order=(1, 1, 1))
-            fitted_model = model.fit()
-            
-            # التنبؤ
-            forecast = fitted_model.forecast(steps=request.prediction_horizon)
-            
-            return np.array(forecast)
-            
+            # حساب الثقة بناءً على أداء النموذج
+            base_confidence = model.performance_metrics.get('accuracy', 0.5)
+
+            # تعديل الثقة بناءً على البيانات
+            data_quality = 1.0 - (np.std(data) / (np.mean(np.abs(data)) + 1e-8))
+            data_quality = max(0.0, min(1.0, data_quality))
+
+            confidence = (base_confidence + data_quality) / 2
+
+            # حساب فترة الثقة
+            error_margin = model.performance_metrics.get('mse', 1.0) ** 0.5
+            interval = (
+                float(prediction - 1.96 * error_margin),
+                float(prediction + 1.96 * error_margin)
+            )
+
+            return float(confidence), interval
+
         except Exception as e:
-            self.logger.error(f"خطأ في التنبؤ بـ ARIMA: {e}")
-            return np.zeros(request.prediction_horizon)
+            self.logger.error(f"خطأ في حساب الثقة: {e}")
+            return 0.5, (0.0, 0.0)
 
-    async def _calculate_confidence_intervals(
-        self, 
-        predictions: np.ndarray, 
-        data: Dict[str, Any], 
-        request: PredictionRequest
-    ) -> List[Tuple[float, float]]:
-        """حساب فترات الثقة للتنبؤات"""
+    async def _get_feature_importance(self, model: PredictionModel) -> Dict[str, float]:
+        """الحصول على أهمية الميزات"""
         try:
-            # حساب الانحراف المعياري من البيانات التاريخية
-            df = data['dataframe']
-            target_variable = data['target_variable']
-            
-            if target_variable and target_variable in df.columns:
-                std = df[target_variable].std()
+            importance = {}
+
+            if hasattr(model.model_object, 'feature_importances_'):
+                # نماذج sklearn مع feature_importances_
+                importances = model.model_object.feature_importances_
+                for i, importance_value in enumerate(importances):
+                    feature_name = model.feature_names[i] if i < len(model.feature_names) else f"feature_{i}"
+                    importance[feature_name] = float(importance_value)
+
+            elif hasattr(model.model_object, 'coef_'):
+                # نماذج خطية
+                coefficients = model.model_object.coef_
+                for i, coef in enumerate(coefficients):
+                    feature_name = model.feature_names[i] if i < len(model.feature_names) else f"feature_{i}"
+                    importance[feature_name] = float(abs(coef))
+
             else:
-                std = np.std(predictions)
-            
-            # حساب فترات الثقة
-            confidence_level = request.confidence_level
-            z_score = 1.96 if confidence_level == 0.95 else 2.58  # للثقة 95% أو 99%
-            
-            margin = z_score * std
-            
-            intervals = []
-            for pred in predictions:
-                lower = pred - margin
-                upper = pred + margin
-                intervals.append((lower, upper))
-            
-            return intervals
-            
-        except Exception as e:
-            self.logger.error(f"خطأ في حساب فترات الثقة: {e}")
-            return [(p, p) for p in predictions]
+                # أهمية افتراضية متساوية
+                for feature_name in model.feature_names:
+                    importance[feature_name] = 1.0 / len(model.feature_names)
 
-    async def _detect_anomalies(self, data: Dict[str, Any], predictions: np.ndarray) -> List[int]:
-        """كشف الشذوذ في التنبؤات"""
+            return importance
+
+        except Exception as e:
+            self.logger.error(f"خطأ في حساب أهمية الميزات: {e}")
+            return {}
+
+    async def _generate_explanation(self, model: PredictionModel, data: np.ndarray, prediction: Any) -> str:
+        """توليد تفسير للتنبؤ"""
         try:
-            # استخدام IQR لكشف الشذوذ
-            Q1 = np.percentile(predictions, 25)
-            Q3 = np.percentile(predictions, 75)
-            IQR = Q3 - Q1
-            
-            lower_bound = Q1 - 1.5 * IQR
-            upper_bound = Q3 + 1.5 * IQR
-            
-            anomalies = []
-            for i, pred in enumerate(predictions):
-                if pred < lower_bound or pred > upper_bound:
-                    anomalies.append(i)
-            
-            return anomalies
-            
-        except Exception as e:
-            self.logger.error(f"خطأ في كشف الشذوذ: {e}")
-            return []
+            feature_importance = await self._get_feature_importance(model)
 
-    async def _analyze_feature_importance(
-        self, 
-        model_name: str, 
-        data: Dict[str, Any]
-    ) -> Optional[Dict[str, float]]:
-        """تحليل أهمية الميزات"""
-        try:
-            model = self.models[model_name]
-            features = data['features']
-            
-            if hasattr(model, 'feature_importances_'):
-                importances = model.feature_importances_
-                return dict(zip(features, importances))
-            elif hasattr(model, 'coef_'):
-                coefficients = np.abs(model.coef_)
-                return dict(zip(features, coefficients))
-            
-            return None
-            
-        except Exception as e:
-            self.logger.error(f"خطأ في تحليل أهمية الميزات: {e}")
-            return None
+            if not feature_importance:
+                return f"التنبؤ: {prediction:.2f} باستخدام نموذج {model.model_type}"
 
-    async def _generate_recommendations(
-        self, 
-        predictions: np.ndarray, 
-        patterns: List[PatternAnalysis], 
-        anomalies: List[int], 
-        request: PredictionRequest
-    ) -> List[str]:
-        """إنشاء التوصيات بناءً على التنبؤات"""
+            # العثور على أهم الميزات
+            top_features = sorted(
+                feature_importance.items(),
+                key=lambda x: x[1],
+                reverse=True
+            )[:3]
+
+            explanation = f"التنبؤ: {prediction:.2f}\n"
+            explanation += f"النموذج المستخدم: {model.model_type}\n"
+            explanation += f"دقة النموذج: {model.performance_metrics.get('accuracy', 0):.1%}\n"
+            explanation += "أهم العوامل المؤثرة:\n"
+
+            for feature, importance in top_features:
+                explanation += f"• {feature}: {importance:.1%}\n"
+
+            return explanation
+
+        except Exception as e:
+            self.logger.error(f"خطأ في توليد التفسير: {e}")
+            return f"التنبؤ: {prediction}"
+
+    async def _generate_recommendations(self, request: PredictionRequest, prediction: Any) -> List[str]:
+        """توليد التوصيات"""
         try:
             recommendations = []
-            
-            # تحليل الاتجاه العام
-            if len(predictions) > 1:
-                trend = np.mean(np.diff(predictions))
-                if trend > 0:
-                    recommendations.append("الاتجاه العام صاعد - قد تكون هناك فرصة للنمو")
-                elif trend < 0:
-                    recommendations.append("الاتجاه العام هابط - يُنصح بالحذر والمراقبة")
-            
-            # توصيات بناءً على الأنماط المكتشفة
-            for pattern in patterns:
-                if pattern.pattern_type == DataPattern.SEASONAL:
-                    recommendations.append("تم اكتشاف نمط موسمي - خطط للتغيرات الموسمية")
-                elif pattern.pattern_type == DataPattern.CYCLIC:
-                    recommendations.append("نمط دوري مكتشف - توقع تكرار هذا النمط")
-                elif pattern.pattern_type == DataPattern.TRENDING:
-                    if pattern.trend_direction == "صاعد":
-                        recommendations.append("اتجاه نمو قوي - استثمر في هذا المجال")
+
+            if request.prediction_type == "time_series":
+                if isinstance(prediction, (int, float)):
+                    if prediction > 0:
+                        recommendations.append("الاتجاه العام إيجابي")
+                        recommendations.append("استعد للنمو المتوقع")
                     else:
-                        recommendations.append("اتجاه هبوط - قد تحتاج لاستراتيجية تصحيحية")
-            
-            # توصيات للشذوذ
-            if anomalies:
-                recommendations.append(f"تم اكتشاف {len(anomalies)} قيمة شاذة - تحقق من البيانات")
-            
+                        recommendations.append("الاتجاه العام سلبي")
+                        recommendations.append("اتخذ إجراءات وقائية")
+
+            elif request.prediction_type == "regression":
+                recommendations.append("راقب القيم الفعلية مقابل المتوقعة")
+                recommendations.append("حدث النموذج بانتظام")
+
             # توصيات عامة
-            if np.std(predictions) > np.mean(predictions) * 0.3:
-                recommendations.append("تقلبات عالية متوقعة - خطط لإدارة المخاطر")
-            
+            recommendations.extend([
+                "استخدم هذا التنبؤ كدليل وليس قرار نهائي",
+                "راجع البيانات المدخلة للتأكد من صحتها",
+                "قارن مع تنبؤات من مصادر أخرى"
+            ])
+
             return recommendations[:5]  # أقصى 5 توصيات
-            
-        except Exception as e:
-            self.logger.error(f"خطأ في إنشاء التوصيات: {e}")
-            return ["تعذر إنشاء توصيات"]
 
-    async def _evaluate_model_performance(
-        self, 
-        model_name: str, 
-        data: Dict[str, Any], 
-        request: PredictionRequest
-    ) -> Dict[str, float]:
-        """تقييم أداء النموذج"""
-        try:
-            performance = {}
-            df = data['dataframe']
-            target_variable = data['target_variable']
-            
-            if target_variable and target_variable in df.columns:
-                model = self.models[model_name]
-                X = df.drop(columns=[target_variable])
-                y = df[target_variable]
-                
-                # تقسيم البيانات للاختبار
-                if len(X) > 10:
-                    X_train, X_test, y_train, y_test = train_test_split(
-                        X, y, test_size=0.2, random_state=42
-                    )
-                    
-                    # تدريب وتقييم
-                    if hasattr(model, 'fit'):
-                        model.fit(X_train, y_train)
-                        y_pred = model.predict(X_test)
-                        
-                        # حساب المقاييس
-                        performance['mse'] = float(mean_squared_error(y_test, y_pred))
-                        performance['rmse'] = float(np.sqrt(performance['mse']))
-                        performance['r2'] = float(r2_score(y_test, y_pred))
-                        
-                        # دقة إضافية للتصنيف
-                        if request.prediction_type == PredictionType.CLASSIFICATION:
-                            y_pred_class = np.round(y_pred)
-                            performance['accuracy'] = float(accuracy_score(y_test, y_pred_class))
-            
-            performance['model_name'] = model_name
-            performance['evaluation_time'] = datetime.now().isoformat()
-            
-            return performance
-            
         except Exception as e:
-            self.logger.error(f"خطأ في تقييم الأداء: {e}")
-            return {'error': str(e)}
+            self.logger.error(f"خطأ في توليد التوصيات: {e}")
+            return ["استخدم النتائج بحذر"]
 
-    def _generate_cache_key(self, request: PredictionRequest) -> str:
-        """إنشاء مفتاح للذاكرة المؤقتة"""
+    async def _save_model(self, model: PredictionModel):
+        """حفظ النموذج"""
         try:
-            # إنشاء hash من البيانات المهمة
-            key_data = {
-                'prediction_type': request.prediction_type.value,
-                'target_variable': request.target_variable,
-                'prediction_horizon': request.prediction_horizon,
-                'model_complexity': request.model_complexity.value,
-                'features': sorted(request.features) if request.features else []
+            model_data = {
+                'model_id': model.model_id,
+                'model_type': model.model_type,
+                'model_object': model.model_object,
+                'performance_metrics': model.performance_metrics,
+                'feature_names': model.feature_names,
+                'last_trained': model.last_trained,
+                'training_data_size': model.training_data_size,
+                'is_active': model.is_active
             }
-            
-            key_string = json.dumps(key_data, sort_keys=True)
-            return hashlib.md5(key_string.encode()).hexdigest()
-            
+
+            model_file = self.models_dir / f"{model.model_id}.pkl"
+            with open(model_file, 'wb') as f:
+                pickle.dump(model_data, f)
+
+            self.logger.info(f"✅ تم حفظ النموذج: {model.model_id}")
+
         except Exception as e:
-            self.logger.error(f"خطأ في إنشاء مفتاح الذاكرة المؤقتة: {e}")
-            return f"key_{datetime.now().timestamp()}"
+            self.logger.error(f"خطأ في حفظ النموذج: {e}")
+
+    def _update_performance_stats(self, processing_time: float):
+        """تحديث إحصائيات الأداء"""
+        try:
+            total = self.performance_stats["total_predictions"]
+            current_avg = self.performance_stats["avg_processing_time"]
+
+            new_avg = (current_avg * (total - 1) + processing_time) / total
+            self.performance_stats["avg_processing_time"] = new_avg
+
+            # حساب متوسط الدقة
+            if self.models:
+                total_accuracy = sum(
+                    model.performance_metrics.get('accuracy', 0.0)
+                    for model in self.models.values()
+                )
+                self.performance_stats["average_accuracy"] = total_accuracy / len(self.models)
+
+        except Exception as e:
+            self.logger.error(f"خطأ في تحديث الإحصائيات: {e}")
 
     async def get_prediction_statistics(self) -> Dict[str, Any]:
         """الحصول على إحصائيات التنبؤ"""
         try:
             stats = {
-                'total_requests': len(self.request_history),
-                'model_usage': dict(self.model_usage_stats),
-                'cache_size': len(self.prediction_cache),
-                'performance_metrics': self.performance_metrics,
-                'prediction_types_distribution': {},
-                'average_processing_time': 0.0,
-                'engine_status': 'running' if self.is_running else 'stopped'
+                "performance": self.performance_stats,
+                "models": {
+                    "total_models": len(self.models),
+                    "active_models": sum(1 for m in self.models.values() if m.is_active),
+                    "model_types": list(set(m.model_type for m in self.models.values())),
+                    "best_model": max(
+                        self.models.values(),
+                        key=lambda m: m.performance_metrics.get('accuracy', 0),
+                        default=None
+                    ).model_id if self.models else None
+                },
+                "predictions": {
+                    "total_predictions": len(self.prediction_history),
+                    "recent_predictions": len([
+                        p for p in self.prediction_history
+                        if (datetime.now() - p.timestamp).days < 7
+                    ]),
+                    "average_confidence": np.mean([
+                        p.confidence_score for p in self.prediction_history
+                    ]) if self.prediction_history else 0.0
+                },
+                "data": {
+                    "training_datasets": len(self.training_data),
+                    "feature_encoders": len(self.encoders),
+                    "data_scalers": len(self.scalers)
+                }
             }
-            
-            # توزيع أنواع التنبؤ
-            type_counts = defaultdict(int)
-            total_time = 0
-            
-            for request in self.request_history:
-                type_counts[request.prediction_type.value] += 1
-            
-            stats['prediction_types_distribution'] = dict(type_counts)
-            
-            # متوسط وقت المعالجة من النتائج المخزنة
-            if self.prediction_cache:
-                total_time = sum(result.processing_time for result in self.prediction_cache.values())
-                stats['average_processing_time'] = total_time / len(self.prediction_cache)
-            
+
             return stats
-            
+
         except Exception as e:
             self.logger.error(f"خطأ في الحصول على الإحصائيات: {e}")
-            return {'error': str(e)}
-
-    async def save_models(self):
-        """حفظ النماذج والحالة"""
-        try:
-            # حفظ النماذج
-            models_file = self.models_dir / "models.pkl"
-            with open(models_file, 'wb') as f:
-                pickle.dump(self.models, f)
-            
-            # حفظ معالجات البيانات
-            scalers_file = self.models_dir / "scalers.pkl"
-            with open(scalers_file, 'wb') as f:
-                pickle.dump(self.scalers, f)
-            
-            encoders_file = self.models_dir / "encoders.pkl"
-            with open(encoders_file, 'wb') as f:
-                pickle.dump(self.encoders, f)
-            
-            # حفظ الإحصائيات
-            stats_file = self.models_dir / "statistics.json"
-            stats = await self.get_prediction_statistics()
-            with open(stats_file, 'w', encoding='utf-8') as f:
-                json.dump(stats, f, ensure_ascii=False, indent=2, default=str)
-            
-            self.logger.info("تم حفظ نماذج التنبؤ والحالة")
-            
-        except Exception as e:
-            self.logger.error(f"خطأ في حفظ النماذج: {e}")
-
-    async def load_models(self):
-        """تحميل النماذج والحالة"""
-        try:
-            # تحميل النماذج
-            models_file = self.models_dir / "models.pkl"
-            if models_file.exists():
-                with open(models_file, 'rb') as f:
-                    self.models.update(pickle.load(f))
-            
-            # تحميل معالجات البيانات
-            scalers_file = self.models_dir / "scalers.pkl"
-            if scalers_file.exists():
-                with open(scalers_file, 'rb') as f:
-                    self.scalers.update(pickle.load(f))
-            
-            encoders_file = self.models_dir / "encoders.pkl"
-            if encoders_file.exists():
-                with open(encoders_file, 'rb') as f:
-                    self.encoders.update(pickle.load(f))
-            
-            self.logger.info("تم تحميل نماذج التنبؤ والحالة")
-            
-        except Exception as e:
-            self.logger.error(f"خطأ في تحميل النماذج: {e}")
+            return {"error": str(e)}
 
 # إنشاء مثيل عام
 smart_prediction_engine = SmartPredictionEngine()
 
-async def get_prediction_engine() -> SmartPredictionEngine:
+async def get_smart_prediction_engine() -> SmartPredictionEngine:
     """الحصول على محرك التنبؤ الذكي"""
+    if not smart_prediction_engine.is_initialized:
+        await smart_prediction_engine.initialize()
     return smart_prediction_engine
 
 if __name__ == "__main__":
     async def test_prediction_engine():
-        """اختبار محرك التنبؤ الذكي"""
+        """اختبار محرك التنبؤ"""
         print("🔮 اختبار محرك التنبؤ الذكي المتقدم")
-        print("=" * 60)
-        
-        engine = await get_prediction_engine()
-        await engine.start_prediction_engine()
-        
-        # بيانات تجريبية للاختبار
-        sample_data = {
-            'dataframe': {
-                'value': [10, 12, 11, 13, 15, 14, 16, 18, 17, 19, 21, 20],
-                'feature1': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
-                'feature2': [0.5, 0.7, 0.6, 0.8, 1.0, 0.9, 1.1, 1.3, 1.2, 1.4, 1.6, 1.5]
-            }
-        }
-        
-        # طلب تنبؤ
+        print("=" * 50)
+
+        engine = await get_smart_prediction_engine()
+
+        # إنشاء طلب تنبؤ تجريبي
         request = PredictionRequest(
-            request_id="test_001",
-            prediction_type=PredictionType.TIME_SERIES,
-            data=sample_data,
-            target_variable='value',
-            prediction_horizon=5,
-            confidence_level=0.95,
-            model_complexity=ModelComplexity.MODERATE
+            request_id="test_request_001",
+            user_id="test_user",
+            prediction_type="regression",
+            input_data={
+                "feature_1": 1.5,
+                "feature_2": 2.3,
+                "feature_3": 0.8,
+                "feature_4": 1.2
+            },
+            time_horizon=timedelta(days=7),
+            confidence_level=0.95
         )
-        
-        print("📊 بيانات الاختبار:")
-        print(f"  • نوع التنبؤ: {request.prediction_type.value}")
-        print(f"  • المتغير المستهدف: {request.target_variable}")
-        print(f"  • أفق التنبؤ: {request.prediction_horizon}")
-        print(f"  • مستوى الثقة: {request.confidence_level}")
-        
+
+        print(f"📝 طلب التنبؤ:")
+        print(f"  • النوع: {request.prediction_type}")
+        print(f"  • البيانات: {request.input_data}")
+        print(f"  • الأفق الزمني: {request.time_horizon.days} أيام")
+
         # تنفيذ التنبؤ
-        print("\n🔍 تنفيذ التنبؤ...")
         result = await engine.predict(request)
-        
-        print(f"\n📈 نتائج التنبؤ:")
-        print(f"  • التنبؤات: {[f'{p:.2f}' for p in result.predictions]}")
-        print(f"  • وقت المعالجة: {result.processing_time:.3f} ثانية")
-        print(f"  • الأنماط المكتشفة: {result.detected_patterns}")
-        
-        if result.confidence_intervals:
-            print(f"  • فترات الثقة:")
-            for i, (lower, upper) in enumerate(result.confidence_intervals):
-                print(f"    - التنبؤ {i+1}: [{lower:.2f}, {upper:.2f}]")
-        
+
+        print(f"\n🎯 نتيجة التنبؤ:")
+        print(f"  • القيمة المتوقعة: {result.predicted_value}")
+        print(f"  • درجة الثقة: {result.confidence_score:.1%}")
+        print(f"  • فترة التنبؤ: {result.prediction_interval}")
+        print(f"  • النموذج المستخدم: {result.model_used}")
+
         if result.feature_importance:
-            print(f"  • أهمية الميزات:")
+            print(f"\n🔍 أهمية الميزات:")
             for feature, importance in result.feature_importance.items():
-                print(f"    - {feature}: {importance:.3f}")
-        
-        if result.anomalies:
-            print(f"  • الشذوذ المكتشف: {result.anomalies}")
-        
-        print(f"\n💡 التوصيات:")
-        for recommendation in result.recommendations:
-            print(f"  • {recommendation}")
-        
-        print(f"\n📊 مقاييس الأداء:")
-        for metric, value in result.model_performance.items():
-            print(f"  • {metric}: {value}")
-        
-        # اختبار أنواع تنبؤ مختلفة
-        print(f"\n🎯 اختبار أنواع التنبؤ المختلفة:")
-        
-        # تنبؤ بالتصنيف
-        classification_request = PredictionRequest(
-            request_id="test_002",
-            prediction_type=PredictionType.CLASSIFICATION,
-            data=sample_data,
-            target_variable='value',
-            prediction_horizon=3
-        )
-        
-        classification_result = await engine.predict(classification_request)
-        print(f"  • التصنيف: {[f'{p:.2f}' for p in classification_result.predictions]}")
-        
-        # كشف الشذوذ
-        anomaly_request = PredictionRequest(
-            request_id="test_003",
-            prediction_type=PredictionType.ANOMALY_DETECTION,
-            data=sample_data,
-            prediction_horizon=len(sample_data['dataframe']['value'])
-        )
-        
-        anomaly_result = await engine.predict(anomaly_request)
-        print(f"  • كشف الشذوذ: {anomaly_result.anomalies}")
-        
-        # الحصول على الإحصائيات
-        print(f"\n📊 إحصائيات المحرك:")
+                print(f"  • {feature}: {importance:.1%}")
+
+        print(f"\n📝 التفسير:")
+        print(f"  {result.explanation}")
+
+        if result.recommendations:
+            print(f"\n💡 التوصيات:")
+            for rec in result.recommendations:
+                print(f"  • {rec}")
+
+        # إحصائيات النظام
         stats = await engine.get_prediction_statistics()
-        print(f"  • إجمالي الطلبات: {stats['total_requests']}")
-        print(f"  • استخدام النماذج: {stats['model_usage']}")
-        print(f"  • حجم الذاكرة المؤقتة: {stats['cache_size']}")
-        print(f"  • متوسط وقت المعالجة: {stats['average_processing_time']:.3f} ثانية")
-        
-        # حفظ النماذج
-        await engine.save_models()
-        print(f"\n💾 تم حفظ النماذج والحالة")
-        
-        # إيقاف المحرك
-        await engine.stop_prediction_engine()
-        print(f"\n⏹️ تم إيقاف محرك التنبؤ")
-        
+        print(f"\n📊 إحصائيات النظام:")
+        print(f"  • إجمالي التنبؤات: {stats['performance']['total_predictions']}")
+        print(f"  • التنبؤات الناجحة: {stats['performance']['successful_predictions']}")
+        print(f"  • متوسط الدقة: {stats['performance']['average_accuracy']:.1%}")
+        print(f"  • عدد النماذج: {stats['models']['total_models']}")
+
         print("\n✨ انتهى الاختبار بنجاح!")
 
     # تشغيل الاختبار
