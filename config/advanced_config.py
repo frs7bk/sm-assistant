@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
@@ -117,22 +116,35 @@ class InterfaceConfig:
     enable_api: bool = True
     api_rate_limit: int = 1000  # طلبات في الساعة
 
+@dataclass
+class AIModelsConfig:
+    """إعدادات نماذج الذكاء الاصطناعي"""
+    openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
+    huggingface_token: str = os.getenv("HUGGINGFACE_TOKEN", "")
+    google_api_key: str = os.getenv("GOOGLE_API_KEY", "")
+    anthropic_api_key: str = os.getenv("ANTHROPIC_API_KEY", "")
+
+    # إعدادات النماذج المحلية
+    use_local_models: bool = os.getenv("USE_LOCAL_MODELS", "false").lower() == "true"
+    models_cache_dir: str = os.getenv("MODELS_CACHE_DIR", "data/models")
+    max_model_memory: int = int(os.getenv("MAX_MODEL_MEMORY", "4096"))  # MB
+
 class AdvancedConfig:
     """إدارة التكوين المتقدم"""
-    
+
     def __init__(self, config_file: Optional[str] = None):
         """تهيئة التكوين"""
         self.config_file = config_file or "config/settings.yaml"
         self.config_dir = Path("config")
         self.data_dir = Path("data")
-        
+
         # إنشاء المجلدات
         self.config_dir.mkdir(exist_ok=True)
         self.data_dir.mkdir(exist_ok=True)
-        
+
         # تهيئة السجلات
         self.logger = logging.getLogger(__name__)
-        
+
         # تحميل التكوين
         self.ai_models = AIModelConfig()
         self.database = DatabaseConfig()
@@ -143,16 +155,17 @@ class AdvancedConfig:
         self.learning = LearningConfig()
         self.analytics = AnalyticsConfig()
         self.interface = InterfaceConfig()
-        
+        self.ai_models_config = AIModelsConfig() # Adding AIModelsConfig
+
         # تحميل التكوين من الملفات
         self.load_config()
-        
+
         # تحميل متغيرات البيئة
         self.load_environment_variables()
-        
+
         # التحقق من صحة التكوين
         self.validate_config()
-    
+
     def load_config(self):
         """تحميل التكوين من الملفات"""
         try:
@@ -163,7 +176,7 @@ class AdvancedConfig:
                     config_data = yaml.safe_load(f)
                     self.apply_config_data(config_data)
                     self.logger.info(f"تم تحميل التكوين من: {yaml_file}")
-            
+
             # تحميل من JSON
             json_file = self.config_dir / "settings.json"
             if json_file.exists():
@@ -171,10 +184,10 @@ class AdvancedConfig:
                     config_data = json.load(f)
                     self.apply_config_data(config_data)
                     self.logger.info(f"تم تحميل التكوين من: {json_file}")
-                    
+
         except Exception as e:
             self.logger.warning(f"خطأ في تحميل التكوين: {e}")
-    
+
     def load_environment_variables(self):
         """تحميل متغيرات البيئة"""
         try:
@@ -182,30 +195,30 @@ class AdvancedConfig:
             self.ai_models.openai_api_key = os.getenv("OPENAI_API_KEY", "")
             self.ai_models.huggingface_api_key = os.getenv("HUGGINGFACE_API_KEY", "")
             self.ai_models.claude_api_key = os.getenv("CLAUDE_API_KEY", "")
-            
+
             # قواعد البيانات
             self.database.redis_url = os.getenv("REDIS_URL", self.database.redis_url)
             self.database.mongodb_uri = os.getenv("MONGODB_URI", self.database.mongodb_uri)
-            
+
             # الأمان
             self.security.encryption_key = os.getenv("ENCRYPTION_KEY", "")
             self.security.jwt_secret = os.getenv("JWT_SECRET_KEY", "")
             self.security.session_secret = os.getenv("SESSION_SECRET", "")
-            
+
             # الواجهات
             self.interface.web_port = int(os.getenv("WEB_PORT", self.interface.web_port))
             self.interface.host = os.getenv("HOST", self.interface.host)
-            
+
             # الإعدادات العامة
             debug = os.getenv("DEBUG", "false").lower() == "true"
             if debug:
                 logging.getLogger().setLevel(logging.DEBUG)
-            
+
             self.logger.info("تم تحميل متغيرات البيئة")
-            
+
         except Exception as e:
             self.logger.error(f"خطأ في تحميل متغيرات البيئة: {e}")
-    
+
     def apply_config_data(self, config_data: Dict[str, Any]):
         """تطبيق بيانات التكوين"""
         try:
@@ -215,14 +228,14 @@ class AdvancedConfig:
                 for key, value in ai_config.items():
                     if hasattr(self.ai_models, key):
                         setattr(self.ai_models, key, value)
-            
+
             # تطبيق تكوين قاعدة البيانات
             if "database" in config_data:
                 db_config = config_data["database"]
                 for key, value in db_config.items():
                     if hasattr(self.database, key):
                         setattr(self.database, key, value)
-            
+
             # تطبيق باقي التكوينات
             config_mappings = {
                 "security": self.security,
@@ -233,37 +246,37 @@ class AdvancedConfig:
                 "analytics": self.analytics,
                 "interface": self.interface
             }
-            
+
             for section, config_obj in config_mappings.items():
                 if section in config_data:
                     section_config = config_data[section]
                     for key, value in section_config.items():
                         if hasattr(config_obj, key):
                             setattr(config_obj, key, value)
-                            
+
         except Exception as e:
             self.logger.error(f"خطأ في تطبيق التكوين: {e}")
-    
+
     def validate_config(self):
         """التحقق من صحة التكوين"""
         errors = []
-        
+
         # التحقق من مفاتيح API
         if not self.ai_models.openai_api_key:
             errors.append("مفتاح OpenAI API مفقود")
-        
+
         # التحقق من مفاتيح الأمان
         if self.security.enable_encryption and not self.security.encryption_key:
             errors.append("مفتاح التشفير مفقود")
-        
+
         # التحقق من حدود الأداء
         if self.performance.memory_limit_mb < 512:
             errors.append("حد الذاكرة منخفض جداً (أقل من 512 ميجابايت)")
-        
+
         # التحقق من منافذ الواجهات
         if not (1024 <= self.interface.web_port <= 65535):
             errors.append("منفذ الويب غير صحيح")
-        
+
         # عرض التحذيرات
         if errors:
             self.logger.warning("مشاكل في التكوين:")
@@ -271,7 +284,7 @@ class AdvancedConfig:
                 self.logger.warning(f"  - {error}")
         else:
             self.logger.info("التحقق من التكوين: ✅ نجح")
-    
+
     def save_config(self):
         """حفظ التكوين الحالي"""
         try:
@@ -287,17 +300,17 @@ class AdvancedConfig:
                 "analytics": self.analytics.__dict__,
                 "interface": self.interface.__dict__
             }
-            
+
             # حفظ في YAML
             yaml_file = Path(self.config_file)
             with open(yaml_file, 'w', encoding='utf-8') as f:
                 yaml.dump(config_data, f, default_flow_style=False, allow_unicode=True)
-            
+
             self.logger.info(f"تم حفظ التكوين في: {yaml_file}")
-            
+
         except Exception as e:
             self.logger.error(f"خطأ في حفظ التكوين: {e}")
-    
+
     def get_config_summary(self) -> str:
         """الحصول على ملخص التكوين"""
         summary = f"""
@@ -347,7 +360,7 @@ class AdvancedConfig:
    • API: {'✅' if self.interface.enable_api else '❌'}
 """
         return summary
-    
+
     def reset_to_defaults(self):
         """إعادة تعيين التكوين للإعدادات الافتراضية"""
         self.__init__()
